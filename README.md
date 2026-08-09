@@ -8,7 +8,14 @@ It is built for power users who want gesture automation on Mac without opening f
 
 [**→ Download trackpad_control.zip from the latest release**](https://github.com/Smoep/trackpad_control/releases/latest)
 
-Unzip and drag **trackpad_control.app** to your Applications folder.
+Unzip and drag **trackpad_control.app** to your Applications folder. New installs
+from the prebuilt release start with a library of 51 recorded gestures, so you can
+enable, adapt, or delete examples instead of recording everything from scratch.
+
+The release also includes `starter-gestures.json` as a separate download. Import
+it from **Settings → Advanced → Import…** if you already ran an older version or
+want to restore the starter library. Importing replaces the current gesture list,
+so export your existing gestures first if you want to keep them.
 
 > **First launch:** macOS will show a security warning because the app is not signed with an Apple Developer certificate.
 > Right-click (or Control-click) the app → **Open** → **Open**. You only need to do this once.

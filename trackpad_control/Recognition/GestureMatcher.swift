@@ -78,7 +78,14 @@ enum GestureMatcher {
                 let turnDiff = abs(perfTurns - sampTurns)
                 // Each extra turn reduces score by 15%
                 let turnPenalty = 1.0 - Double(turnDiff) * 0.15
-                let finalScore = score * max(0, turnPenalty)
+                // Net-direction (mirror) penalty: two shapes can have similar
+                // per-segment angles yet point in mirror-opposite net directions
+                // (e.g. up-left TLQ vs up-right TRQ). Penalize by how far the
+                // overall start→end direction disagrees, so mirrored gestures
+                // separate cleanly instead of both scoring "up-ish".
+                let netFactor = netDirectionFactor(resampled, resampledSample)
+                let openClosedFactor = openClosedPathFactor(resampled, resampledSample)
+                let finalScore = score * max(0, turnPenalty) * netFactor * openClosedFactor
 
                 if finalScore > bestScore {
                     bestScore = finalScore
@@ -139,7 +146,9 @@ enum GestureMatcher {
                 let sampTurns = countTurns(sampleAngles)
                 let turnDiff = abs(perfTurns - sampTurns)
                 let turnPenalty = 1.0 - Double(turnDiff) * 0.15
-                let finalScore = score * max(0, turnPenalty)
+                let netFactor = netDirectionFactor(resampled, resampledSample)
+                let openClosedFactor = openClosedPathFactor(resampled, resampledSample)
+                let finalScore = score * max(0, turnPenalty) * netFactor * openClosedFactor
 
                 if finalScore > bestScore {
                     bestScore = finalScore
@@ -205,6 +214,15 @@ enum GestureMatcher {
     /// Compare angle sequences index-by-index. Both arrays come from paths
     /// resampled to the same point count, so indices correspond.
     /// Returns 0–1 where 1 = identical direction at every segment.
+    ///
+    /// Per-segment angle differences below `angularDeadband` are treated as a
+    /// perfect match. Real strokes always carry small hand jitter, so forgiving
+    /// tiny per-segment disagreements lifts the confidence of a correct-but-
+    /// imperfect stroke toward 1.0 without lifting genuinely different gestures
+    /// (their per-segment diffs stay well above the deadband). Validated via
+    /// recognizer_eval.py: raises avg correct confidence and confident-count with
+    /// no new confusions; 20° over-forgives and introduces one, so 15° is the cap.
+    private static let angularDeadband = 15.0 * .pi / 180.0
     private static func angularSimilarity(_ a: [Double], _ b: [Double]) -> Double {
         let count = min(a.count, b.count)
         guard count > 0 else { return 0 }
@@ -213,11 +231,58 @@ enum GestureMatcher {
         for i in 0..<count {
             var diff = abs(a[i] - b[i])
             if diff > .pi { diff = 2 * .pi - diff }
+            diff = max(0, diff - angularDeadband)
             totalDelta += diff
         }
         let avgDelta = totalDelta / Double(count)
         // avgDelta in [0, π]: 0 → 1.0 (perfect), π → 0.0 (opposite)
         return max(0, 1.0 - avgDelta / .pi)
+    }
+
+    /// Multiplicative penalty (0–1) based on how far two gestures' overall
+    /// start→end directions disagree. 1.0 when they point the same way, lower as
+    /// they diverge, driven to 0 for opposite directions. This separates
+    /// mirror-image shapes (e.g. up-left vs up-right diagonals) that the
+    /// per-segment angular similarity alone scores almost equally because both
+    /// are "mostly upward". Weight tuned against the sample DB (recognizer_eval.py):
+    /// paired with the 15° angular deadband, weight 2.0 gives leave-one-out top-1
+    /// 97.1% → 98.1% and widens tight pairs (e.g. Window - BLQ vs Window - LD
+    /// margin 0.376 → 0.421) with no new confusions. Weight 3.0 over-separates and
+    /// breaks Window - C vs Close tab, so 2.0 is the ceiling.
+    private static let netDirectionWeight = 2.0
+    private static func netDirectionFactor(_ a: [PathPoint], _ b: [PathPoint]) -> Double {
+        guard let a0 = a.first, let a1 = a.last, let b0 = b.first, let b1 = b.last else { return 1.0 }
+        let adx = a1.x - a0.x, ady = a1.y - a0.y
+        let bdx = b1.x - b0.x, bdy = b1.y - b0.y
+        let am = (adx * adx + ady * ady).squareRoot()
+        let bm = (bdx * bdx + bdy * bdy).squareRoot()
+        guard am > 1e-9, bm > 1e-9 else { return 1.0 }
+        let cosine = max(-1.0, min(1.0, (adx * bdx + ady * bdy) / (am * bm)))
+        let angle = acos(cosine) // 0…π
+        return max(0.0, 1.0 - (angle / .pi) * netDirectionWeight)
+    }
+
+    /// Penalize comparisons between open strokes and closed-loop strokes. A
+    /// circular/loop gesture can share many local segment directions with a
+    /// curved quadrant stroke, but its endpoint returns near the start. The
+    /// openness ratio (net displacement / path length) captures that distinction
+    /// without making the matcher position- or scale-dependent.
+    private static func openClosedPathFactor(_ a: [PathPoint], _ b: [PathPoint]) -> Double {
+        let ao = pathOpenness(a)
+        let bo = pathOpenness(b)
+        let openThreshold = 0.35
+        let closedThreshold = 0.12
+        if (ao >= openThreshold && bo <= closedThreshold) || (bo >= openThreshold && ao <= closedThreshold) {
+            return 0.35
+        }
+        return 1.0
+    }
+
+    private static func pathOpenness(_ path: [PathPoint]) -> Double {
+        guard let first = path.first, let last = path.last else { return 0 }
+        let length = GestureNormalizer.pathLength(path)
+        guard length > 1e-9 else { return 0 }
+        return hypot(last.x - first.x, last.y - first.y) / length
     }
 
     // MARK: - Structural Complexity

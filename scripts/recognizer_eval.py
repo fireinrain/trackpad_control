@@ -69,6 +69,9 @@ def direction_angles(points):
     return angles
 
 
+ANGULAR_DEADBAND = math.radians(15)  # matches GestureMatcher.angularDeadband
+
+
 def angular_similarity(a, b):
     n = min(len(a), len(b))
     if n == 0:
@@ -78,6 +81,7 @@ def angular_similarity(a, b):
         diff = abs(a[i] - b[i])
         if diff > math.pi:
             diff = 2 * math.pi - diff
+        diff = max(0.0, diff - ANGULAR_DEADBAND)
         total += diff
     return max(0.0, 1.0 - (total / n) / math.pi)
 
@@ -149,14 +153,49 @@ def cloud_score(a, b):
     return max(0.0, 1.0 - d / (len(a) * 0.5))
 
 
-def score(perf_angles, perf_turns, samp_pts):
+def score(perf_angles, perf_turns, samp_pts, perf_pts=None):
     rs = resample(samp_pts)
     sa = direction_angles(rs)
     if not sa:
         return 0.0
     sim = angular_similarity(perf_angles, sa)
     pen = max(0.0, 1.0 - abs(perf_turns - count_turns(sa)) * TURN_PENALTY)
-    return sim * pen
+    net = net_direction_factor(perf_pts, samp_pts) if perf_pts is not None else 1.0
+    open_closed = open_closed_path_factor(perf_pts, samp_pts) if perf_pts is not None else 1.0
+    return sim * pen * net * open_closed
+
+
+NET_DIRECTION_WEIGHT = 2.0  # matches GestureMatcher.netDirectionWeight
+
+
+def net_direction_factor(a, b):
+    if not a or not b:
+        return 1.0
+    adx, ady = a[-1][0] - a[0][0], a[-1][1] - a[0][1]
+    bdx, bdy = b[-1][0] - b[0][0], b[-1][1] - b[0][1]
+    am = math.hypot(adx, ady)
+    bm = math.hypot(bdx, bdy)
+    if am < 1e-9 or bm < 1e-9:
+        return 1.0
+    cos = max(-1.0, min(1.0, (adx * bdx + ady * bdy) / (am * bm)))
+    return max(0.0, 1.0 - (math.acos(cos) / math.pi) * NET_DIRECTION_WEIGHT)
+
+
+def path_openness(pts):
+    if not pts:
+        return 0.0
+    length = path_len(pts)
+    if length <= 1e-9:
+        return 0.0
+    return math.hypot(pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1]) / length
+
+
+def open_closed_path_factor(a, b):
+    ao = path_openness(a)
+    bo = path_openness(b)
+    if (ao >= 0.35 and bo <= 0.12) or (bo >= 0.35 and ao <= 0.12):
+        return 0.35
+    return 1.0
 
 
 def main():
@@ -194,7 +233,7 @@ def main():
                         if len(sp) < 2:
                             continue
                         if method == "angular":
-                            best = max(best, score(pa, ptn, sp))
+                            best = max(best, score(pa, ptn, sp, pts))
                         else:
                             best = max(best, cloud_score(pc, normalize_cloud(sp)))
                     if best > 0:

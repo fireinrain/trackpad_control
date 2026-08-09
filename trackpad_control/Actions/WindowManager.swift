@@ -19,8 +19,10 @@ private let mtdLogFormatter: DateFormatter = {
     f.dateFormat = "HH:mm:ss.SSS"
     return f
 }()
-func mtdLog(_ s: String) {
-    let line = "\(mtdLogFormatter.string(from: Date())) \(s)\n"
+
+func appendDiagnosticsLogLine(_ line: String) {
+    guard UserDefaults.standard.bool(forKey: "adv_diagnostics") else { return }
+    let line = "\(line)\n"
     mtdLogQueue.async {
         guard let data = line.data(using: .utf8) else { return }
         if FileManager.default.fileExists(atPath: mtdLogURL.path) {
@@ -32,6 +34,16 @@ func mtdLog(_ s: String) {
         } else {
             try? data.write(to: mtdLogURL)
         }
+    }
+}
+
+func mtdLog(_ s: String) {
+    appendDiagnosticsLogLine("\(mtdLogFormatter.string(from: Date())) \(s)")
+}
+
+func clearDiagnosticsLog() {
+    mtdLogQueue.sync {
+        try? Data().write(to: mtdLogURL, options: .atomic)
     }
 }
 
@@ -365,15 +377,25 @@ enum WindowManager {
     }
 
     static func cycleHorizontalTiling(positive: Bool) {
-        guard let screen = NSScreen.main else { return }
+        mtdLog("H-TILE: entry dir=\(positive ? "right" : "left")")
+        guard let screen = NSScreen.main else {
+            mtdLog("H-TILE: ABORT no NSScreen.main")
+            return
+        }
         let visible = screen.visibleFrame
         let screenH = screen.frame.height
 
-        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            mtdLog("H-TILE: ABORT no frontmost app")
+            return
+        }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let windowRef else { return }
+        let axErr = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        guard axErr == .success, let windowRef else {
+            mtdLog("H-TILE: ABORT no focused window app=\(app.localizedName ?? "?") pid=\(app.processIdentifier) axErr=\(axErr.rawValue)")
+            return
+        }
         let axWindow = windowRef as! AXUIElement
 
         let side: HorizontalSide = positive ? .right : .left
@@ -393,6 +415,7 @@ enum WindowManager {
         let layout = HorizontalLayout(rawValue: nextIndex) ?? .half
 
         let target = horizontalTargetFrame(side: side, layout: layout, visible: visible)
+    mtdLog("H-TILE: target app=\(app.localizedName ?? "?") pid=\(pid) side=\(side) layout=\(layout) frame=\(target)")
         setWindowFrame(axWindow, target: target, screenHeight: screenH)
         AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
         app.activate()
@@ -400,6 +423,7 @@ enum WindowManager {
         horizontalCycleSideByPID[pid] = side
         horizontalCycleIndexByPID[pid] = nextIndex
         horizontalCycleTimeByPID[pid] = now
+        mtdLog("H-TILE: applied side=\(side) layout=\(layout)")
     }
 
     static func execute(_ action: WindowAction) {
@@ -413,7 +437,11 @@ enum WindowManager {
             return
         }
 
-        guard let screen = NSScreen.main else { return }
+        guard let screen = NSScreen.main else {
+            mtdLog("execute: ABORT no NSScreen.main")
+            wmLog.error("execute: ABORT no NSScreen.main")
+            return
+        }
         let visible = screen.visibleFrame  // excludes menu bar and dock (bottom-left origin)
         let screenH = screen.frame.height  // full screen height for coordinate flip
 
@@ -435,6 +463,7 @@ enum WindowManager {
         if let front = frontmost, front.processIdentifier != ownPID {
             // A real, non-self app is in front — target it and refresh the sticky.
             targetApp = front
+            mtdLog("execute: target=frontmost app=\(front.localizedName ?? "?") pid=\(front.processIdentifier)")
         } else if (now - stickyTime) < stickyDuration,
                   stickyPID != 0,
                   let lastApp = NSRunningApplication(processIdentifier: stickyPID),
@@ -442,17 +471,25 @@ enum WindowManager {
             // Frontmost is missing or is our own app — fall back to the sticky target.
             targetApp = lastApp
             targetApp.activate()
+            mtdLog("execute: target=sticky app=\(lastApp.localizedName ?? "?") pid=\(lastApp.processIdentifier) frontmost=\(frontmost?.localizedName ?? "nil")")
         } else if let front = frontmost {
             targetApp = front
+            mtdLog("execute: target=frontmost-self app=\(front.localizedName ?? "?") pid=\(front.processIdentifier)")
         } else {
+            mtdLog("execute: ABORT no target app (frontmost=nil, no sticky)")
+            wmLog.error("execute: ABORT no target app")
             return
         }
 
         let appElement = AXUIElementCreateApplication(targetApp.processIdentifier)
 
         var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let window = windowRef else { return }
+        let focusedErr = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        guard focusedErr == .success, let window = windowRef else {
+            mtdLog("execute: ABORT no focused window app=\(targetApp.localizedName ?? "?") pid=\(targetApp.processIdentifier) axErr=\(focusedErr.rawValue)")
+            wmLog.error("execute: ABORT no focused window app=\(targetApp.localizedName ?? "?") axErr=\(focusedErr.rawValue)")
+            return
+        }
 
         let axWindow = window as! AXUIElement
 
@@ -568,18 +605,95 @@ enum WindowManager {
         }
     }
 
-    private static func setWindowFrame(_ axWindow: AXUIElement, target: CGRect, screenHeight: CGFloat) {
-        let axX = target.origin.x
-        let axY = screenHeight - target.origin.y - target.height
+    private static func axSetPosition(_ axWindow: AXUIElement, _ point: CGPoint) {
+        var p = point
+        if let v = AXValueCreate(.cgPoint, &p) {
+            AXUIElementSetAttributeValue(axWindow, kAXPositionAttribute as CFString, v)
+        }
+    }
 
-        var position = CGPoint(x: axX, y: axY)
-        if let posValue = AXValueCreate(.cgPoint, &position) {
-            AXUIElementSetAttributeValue(axWindow, kAXPositionAttribute as CFString, posValue)
+    private static func axSetSize(_ axWindow: AXUIElement, _ size: CGSize) {
+        var s = size
+        if let v = AXValueCreate(.cgSize, &s) {
+            AXUIElementSetAttributeValue(axWindow, kAXSizeAttribute as CFString, v)
+        }
+    }
+
+    /// Largest deviation between the window's current frame and the requested one.
+    /// Returns nil when the frame cannot be read.
+    private static func frameOffset(_ axWindow: AXUIElement, _ pos: CGPoint, _ size: CGSize) -> CGFloat? {
+        guard let a = windowFrame(of: axWindow) else { return nil }
+        return max(abs(a.position.x - pos.x), abs(a.position.y - pos.y),
+                   abs(a.size.width - size.width), abs(a.size.height - size.height))
+    }
+
+    private static func describeFrame(_ f: (position: CGPoint, size: CGSize)?) -> String {
+        guard let f else { return "nil" }
+        return "(\(Int(f.position.x)),\(Int(f.position.y)),\(Int(f.size.width)),\(Int(f.size.height)))"
+    }
+
+    /// Apply position + size without ever passing through a frame that overflows the
+    /// display. Apps (notably Chromium) clamp a window that would extend past the screen
+    /// edge, and the clamped dimension sticks even after the window is moved into place.
+    /// Only WIDTH decides the order here: horizontal clamping is what breaks tiling, and
+    /// a taller window never prevents a horizontal move.
+    private static func applyFrame(_ axWindow: AXUIElement, _ position: CGPoint, _ size: CGSize) {
+        let current = windowFrame(of: axWindow)
+        let wider = current.map { size.width > $0.size.width } ?? false
+        if wider {
+            // Growing: move into place first, then expand.
+            axSetPosition(axWindow, position)
+            axSetSize(axWindow, size)
+        } else {
+            // Shrinking: narrow first so the target origin is always reachable.
+            axSetSize(axWindow, size)
+            axSetPosition(axWindow, position)
+        }
+        // Re-assert both. The first pass can still be clamped while the window is
+        // partway through the change, and the second pass lands once it fits.
+        axSetSize(axWindow, size)
+        axSetPosition(axWindow, position)
+    }
+
+    private static func setWindowFrame(_ axWindow: AXUIElement, target: CGRect, screenHeight: CGFloat) {
+        let position = CGPoint(x: target.origin.x,
+                               y: screenHeight - target.origin.y - target.height)
+        let size = target.size
+
+        let before = windowFrame(of: axWindow)
+        applyFrame(axWindow, position, size)
+
+        if let off = frameOffset(axWindow, position, size), off <= 2 {
+            mtdLog("H-TILE: VERIFIED")
+            return
         }
 
-        var size = CGSize(width: target.size.width, height: target.size.height)
-        if let sizeValue = AXValueCreate(.cgSize, &size) {
-            AXUIElementSetAttributeValue(axWindow, kAXSizeAttribute as CFString, sizeValue)
+        var posSettable: DarwinBoolean = false
+        var sizeSettable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(axWindow, kAXPositionAttribute as CFString, &posSettable)
+        AXUIElementIsAttributeSettable(axWindow, kAXSizeAttribute as CFString, &sizeSettable)
+        mtdLog("H-TILE: pass1 posSettable=\(posSettable.boolValue) sizeSettable=\(sizeSettable.boolValue) before=\(describeFrame(before)) after=\(describeFrame(windowFrame(of: axWindow)))")
+
+        // Chrome animates resizes, so an immediate read catches mid-flight geometry.
+        // Let it settle and re-check BEFORE re-issuing, otherwise the retry restarts
+        // the animation and we fight it. Runs off the touch thread to keep input snappy.
+        let wantPos = position
+        let wantSize = size
+        DispatchQueue.global(qos: .userInitiated).async {
+            for pass in 2...5 {
+                usleep(120_000)
+                if let off = frameOffset(axWindow, wantPos, wantSize), off <= 2 {
+                    mtdLog("H-TILE: VERIFIED pass=\(pass)")
+                    return
+                }
+                applyFrame(axWindow, wantPos, wantSize)
+            }
+            usleep(120_000)
+            if let off = frameOffset(axWindow, wantPos, wantSize), off <= 2 {
+                mtdLog("H-TILE: VERIFIED settled")
+                return
+            }
+            mtdLog("H-TILE: MISMATCH want=(\(Int(wantPos.x)),\(Int(wantPos.y)),\(Int(wantSize.width)),\(Int(wantSize.height))) got=\(describeFrame(windowFrame(of: axWindow)))")
         }
     }
 

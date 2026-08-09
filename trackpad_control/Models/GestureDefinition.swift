@@ -66,6 +66,13 @@ enum ContinuousControl: String, Codable, CaseIterable, Sendable {
     var isNavigationControl: Bool {
         self == .scrollDesktops || self == .cycleWindows
     }
+
+    /// Controls where each step applies a discrete state change (desktop switch,
+    /// window layout cycle) rather than a smooth ramp like volume/brightness.
+    /// These must not re-fire from leftover accumulator distance inside one swipe.
+    var isSteppedControl: Bool {
+        isNavigationControl || self == .windowHorizontalTiling
+    }
 }
 
 // MARK: - Trackpad Zone

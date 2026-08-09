@@ -17,15 +17,7 @@ private let ztLogPath: String = {
 private func ztLog(_ msg: String) {
     guard UserDefaults.standard.bool(forKey: "adv_diagnostics") else { return }
     let ts = String(format: "%.3f", ProcessInfo.processInfo.systemUptime)
-    let line = "[\(ts)] \(msg)\n"
-    guard let data = line.data(using: .utf8) else { return }
-    if let fh = FileHandle(forWritingAtPath: ztLogPath) {
-        fh.seekToEndOfFile()
-        fh.write(data)
-        fh.closeFile()
-    } else {
-        FileManager.default.createFile(atPath: ztLogPath, contents: data)
-    }
+    appendDiagnosticsLogLine("[\(ts)] \(msg)")
 }
 
 // MARK: - MultitouchSupport C Types
@@ -120,6 +112,10 @@ final class TouchCaptureManager {
     private var activeTouches: [Int32: [PathPoint]] = [:]
     private var completedPaths: [[PathPoint]] = []
     private var gestureStartTime: TimeInterval = 0
+    private let gestureLandingWindow: TimeInterval = 0.10
+    private var gestureLandingStartedAt: TimeInterval = 0
+    private var landingSettledLogged = false
+    private var landingSettlementTimer: DispatchWorkItem?
     private var maxFingerCount = 0
     private var completionTimer: DispatchWorkItem?
     // Calibration: peak contact size/density per active path, used to distinguish a
@@ -177,6 +173,12 @@ final class TouchCaptureManager {
     private var flagsMonitor: Any?
     private var fnListenTap: CFMachPort?
     private var fnListenSource: CFRunLoopSource?
+    // Cursor position captured when the anchor hold activates. While set, any
+    // mouseMoved/leftMouseDragged reaching the event tap warps the cursor back
+    // here — the only reliable way to keep the cursor still on this macOS
+    // version (blocking the events and CGAssociateMouseAndMouseCursorPosition
+    // both "succeed" but the WindowServer moves the trackpad cursor anyway).
+    nonisolated(unsafe) var anchorFrozenCursorPos: CGPoint?
 
     // Physical trackpad click detection (Force Touch actuation).
     // A "tap" (including tap-to-click) does NOT press the sensor hard, so its
@@ -233,6 +235,7 @@ final class TouchCaptureManager {
     private var anchorCandidateIndicatorTimer: DispatchWorkItem?
     private var anchorCandidateStartedAt: TimeInterval = 0
     private var anchorCandidateDelay: TimeInterval = 0
+    private var anchorCandidateAttemptedThisGesture = false
     private var anchorActivationActive = false
     // Position where the anchor finger first landed. The finger may drift within
     // `recognitionSettings.anchorHoldTolerance` of this point (small natural
@@ -417,36 +420,49 @@ final class TouchCaptureManager {
 
             switch touch.state {
             case 3: // makeTouch — finger down
-                // If a new gesture starts while previous is pending completion, finalize first
+                // If a lift-completion is pending, the gesture has NOT finalized
+                // yet. A finger landing while other touches are still on the pad is
+                // the SAME physical gesture continuing — a briefly-lifted finger
+                // returning, or the hand still settling. One rule for every gesture
+                // family: rejoin the current gesture (cancel the pending completion).
+                // Only when no touches remain do we finalize and start fresh.
                 if completionTimer != nil {
-                    finalizeGesture()
-                    // finalizeGesture→resetGesture clears modifierActivated.
-                    // Re-arm if any layer's modifier is still held.
-                    let flags = CGEventSource.flagsState(.hidSystemState)
-                    let anyPermitted = (1...5).contains { count in
-                        let key = settings.layerKey(for: count)
-                        return key == .anchor
-                            || key == .alwaysOn
-                            || Self.flagsContain(flags, key: key)
-                            || Self.nsContains(key: key)
+                    if !activeTouches.isEmpty {
+                        ztLog("LIFT-GRACE: rejoined active=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount)")
+                        completionTimer?.cancel()
+                        completionTimer = nil
+                    } else {
+                        finalizeGesture()
+                        // finalizeGesture→resetGesture clears modifierActivated.
+                        // Re-arm if any layer's modifier is still held.
+                        let flags = CGEventSource.flagsState(.hidSystemState)
+                        let anyPermitted = (1...5).contains { count in
+                            let key = settings.layerKey(for: count)
+                            return key == .anchor
+                                || key == .alwaysOn
+                                || Self.flagsContain(flags, key: key)
+                                || Self.nsContains(key: key)
+                        }
+                        guard anyPermitted else { continue }
+                        modifierActivated = true
+                        startModifierFlags = flags
                     }
-                    guard anyPermitted else { continue }
-                    modifierActivated = true
-                    startModifierFlags = flags
                 }
                 if activeTouches.isEmpty && completedPaths.isEmpty {
                     gestureStartTime = now
+                    startGestureLandingWindow(now: now)
                     maxFingerCount = 0
                     peakFingerCount = 0
-                    cachedContinuousCandidates = []
-                    cachedCandidateFingerCount = 0
+                    clearContinuousCandidateCache()
                 }
                 let pt = PathPoint(x: Double(touch.normX), y: Double(touch.normY), timestamp: now - gestureStartTime)
                 activeTouches[pid] = [pt]
                 contactPeakSize[pid] = touch.size
                 contactPeakDensity[pid] = touch.density
                 contactCurrentSize[pid] = touch.size
-                handleAnchorActivationTouchBegan(pathIndex: pid, point: pt)
+                if anchorPathIndex != nil || anchorActivationActive {
+                    handleAnchorActivationTouchBegan(pathIndex: pid, point: pt)
+                }
                 anyBegan = true
                 // Update peak immediately — before any end events can remove fingers
                 peakFingerCount = max(peakFingerCount, recognizedActiveFingerCount())
@@ -517,17 +533,7 @@ final class TouchCaptureManager {
                     continuousStepHistory.removeAll()
                     pinchLastDistance = 0
                 }
-                // Refresh cached candidates when finger count changes
-                cachedContinuousCandidates = GestureStore.shared.gestures.filter { g in
-                    g.inputType == .continuous && g.isEnabled && g.fingerCount == maxFingerCount
-                }
-                cachedPinchCandidates = GestureStore.shared.gestures.filter { g in
-                    g.inputType == .pinch && g.isEnabled && g.fingerCount == maxFingerCount
-                }
-                cachedDialCandidates = GestureStore.shared.gestures.filter { g in
-                    g.inputType == .dial && g.isEnabled && g.fingerCount == maxFingerCount
-                }
-                cachedCandidateFingerCount = maxFingerCount
+                clearContinuousCandidateCache()
             }
             updateCaptureFlags()
         }
@@ -538,6 +544,10 @@ final class TouchCaptureManager {
         // agrees. Otherwise rely purely on live sources.
         updateAnchorActivationState()
         let recognitionActiveTouches = recognizedActiveTouches()
+        let landingSettled = markLandingSettledIfNeeded(now: now)
+        if landingSettled {
+            tryBeginSettledAnchorCandidate()
+        }
         let layerForCount = settings.layerKey(for: maxFingerCount)
         let liveLayerSignal = activationSignal(for: layerForCount)
         let startCorroboratedLayer = Self.flagsContain(startModifierFlags, key: layerForCount)
@@ -546,8 +556,22 @@ final class TouchCaptureManager {
             && !liveLayerSignal
             && !startCorroboratedLayer
         let fullTouchSetActive = !recognitionActiveTouches.isEmpty && recognitionActiveTouches.count == maxFingerCount
+        if landingSettled && fullTouchSetActive && cachedCandidateFingerCount != recognitionActiveTouches.count {
+            refreshContinuousCandidateCache(fingerCount: recognitionActiveTouches.count)
+        }
+        let continuousLiftGraceActive = activeContinuousGesture?.inputType == .continuous
+            && !recognitionActiveTouches.isEmpty
+            && recognitionActiveTouches.count >= max(1, (activeContinuousGesture?.fingerCount ?? maxFingerCount) - 1)
+        let preLockLiftGraceActive = activeContinuousGesture == nil
+            && landingSettled
+            && anyEnded
+            && layerForCount == .alwaysOn
+            && maxFingerCount >= 3
+            && !recognitionActiveTouches.isEmpty
+            && recognitionActiveTouches.count >= maxFingerCount - 1
+        let fullOrGraceTouchSetActive = fullTouchSetActive || continuousLiftGraceActive || preLockLiftGraceActive
 
-        if !fullTouchSetActive && AppState.shared.isGestureActive && !anchorActivationActive {
+        if !fullOrGraceTouchSetActive && AppState.shared.isGestureActive && !anchorActivationActive {
             ztLog("ACTIVE-LAYER: OFF fullTouchSetActive=false active=\(recognitionActiveTouches.count) raw=\(activeTouches.count) max=\(maxFingerCount) desktopIdx=\(WindowManager.currentSpaceIdx)")
             AppState.shared.isGestureActive = false
         }
@@ -575,7 +599,7 @@ final class TouchCaptureManager {
         // When dial candidates exist for the same finger count, defer continuous
         // lock-on to give dial detection a chance to claim rotational motion first.
         let hasDialConflict = !cachedDialCandidates.isEmpty
-        if !editorOpen && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded && !skipUnapproved {
+        if !editorOpen && landingSettled && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded && !skipUnapproved {
             if let primary = recognitionActiveTouches.values.max(by: { $0.count < $1.count }),
                let first = primary.first, let last = primary.last {
                 let dx = last.x - first.x
@@ -718,7 +742,11 @@ final class TouchCaptureManager {
                                 }
                             }
                         }
-                        if accepted && hasDiscreteConflict && !anchorActivationActive && !contGesture.continuousControl.isNavigationControl {
+                        if accepted
+                            && hasDiscreteConflict
+                            && !anchorActivationActive
+                            && !contGesture.continuousControl.isNavigationControl
+                            && contGesture.continuousControl != .windowHorizontalTiling {
                             // When recorded shape gestures exist for this finger count,
                             // only let continuous claim paths that stay mostly straight.
                             let onAxis = effectiveH ? abs(dx) : abs(dy)
@@ -784,7 +812,7 @@ final class TouchCaptureManager {
 
         // Execute continuous steps on movement — skip if fingers are lifting
         // Only for .continuous type — pinch/dial have their own step execution below
-          if let contGesture = activeContinuousGesture, !anyEnded, fullTouchSetActive,
+             if let contGesture = activeContinuousGesture, !anyEnded, fullOrGraceTouchSetActive,
            contGesture.inputType == .continuous,
               let primary = recognitionActiveTouches.values.max(by: { $0.count < $1.count }),
            let last = primary.last {
@@ -793,15 +821,15 @@ final class TouchCaptureManager {
             continuousLastPosition = currentPos
             continuousAccumulator += delta
 
-            let threshold = contGesture.continuousStepThreshold
-            // Rate limit varies by control type: navigation needs longer pauses
+            let threshold = continuousStepThreshold(for: contGesture)
+            // Rate limit varies by control type: stepped controls need longer pauses
             let minInterval = continuousMinInterval(for: contGesture.continuousControl)
             while abs(continuousAccumulator) >= threshold {
                 let elapsed = now - lastContinuousStepTime
                 if elapsed < minInterval {
-                    if contGesture.continuousControl.isNavigationControl {
+                    if contGesture.continuousControl.isSteppedControl {
                         if now - lastNavigationRateLimitLogTime > 0.12 {
-                            ztLog("NAV-RATE-LIMIT: control=\(contGesture.continuousControl.rawValue) elapsed=\(String(format:"%.3f", elapsed)) min=\(String(format:"%.3f", minInterval)) acc=\(String(format:"%.3f", continuousAccumulator))")
+                            ztLog("STEP-RATE-LIMIT: control=\(contGesture.continuousControl.rawValue) elapsed=\(String(format:"%.3f", elapsed)) min=\(String(format:"%.3f", minInterval)) acc=\(String(format:"%.3f", continuousAccumulator))")
                             lastNavigationRateLimitLogTime = now
                         }
                         continuousAccumulator = 0
@@ -809,15 +837,15 @@ final class TouchCaptureManager {
                     break
                 }
                 let positive = continuousAccumulator > 0
-                // Direction reversal guard for navigation:
+                // Direction reversal guard for stepped controls:
                 // Once a direction is established, require 2× threshold to reverse.
                 let newDir = positive ? 1 : -1
-                if contGesture.continuousControl.isNavigationControl && continuousDirection != 0 && newDir != continuousDirection {
+                if contGesture.continuousControl.isSteppedControl && continuousDirection != 0 && newDir != continuousDirection {
                     if abs(continuousAccumulator) < threshold * 2 { break }
                 }
-                if contGesture.continuousControl.isNavigationControl {
-                    // Navigation: fully reset accumulator after each step.
-                    // Prevents leftover distance from triggering an unintended second switch.
+                if contGesture.continuousControl.isSteppedControl {
+                    // Stepped controls: fully reset accumulator after each step.
+                    // Prevents leftover distance from triggering an unintended second step.
                     continuousAccumulator = 0
                 } else {
                     continuousAccumulator -= positive ? threshold : -threshold
@@ -837,7 +865,7 @@ final class TouchCaptureManager {
         }
 
         // Pinch detection — measure inter-finger distance changes (needs ≥2 fingers)
-        if !editorOpen && !skipUnapproved && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded
+        if !editorOpen && landingSettled && !skipUnapproved && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded
             && recognitionActiveTouches.count >= 2 && !cachedPinchCandidates.isEmpty {
             let positions = recognitionActiveTouches.values.compactMap { $0.last }
             if positions.count >= 2 {
@@ -871,7 +899,7 @@ final class TouchCaptureManager {
         }
 
         // Dial detection — measure per-finger rotational change around centroid (needs ≥2 fingers)
-        if !editorOpen && !skipUnapproved && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded
+        if !editorOpen && landingSettled && !skipUnapproved && activeContinuousGesture == nil && fullTouchSetActive && !anyEnded
             && recognitionActiveTouches.count >= 2 && !cachedDialCandidates.isEmpty {
             let minFrames = recognitionActiveTouches.values.map(\.count).min() ?? 0
             if minFrames >= 5 {
@@ -983,34 +1011,7 @@ final class TouchCaptureManager {
             }
         }
 
-        // Live trace overlay — show as soon as the activation layer is live.
-        // (skip when editor is open — editor handles its own overlay)
-        if !editorOpen {
-            let appearance = AppState.shared.appearanceSettings
-            if physicalClickActive || physicalClickTaintedGesture {
-                // Physical click in progress — belongs to another app. Stay silent.
-                GestureOverlayWindow.shared.hideTrace()
-            } else if anchorActivationActive {
-                let allPaths = buildAnchorOverlayPaths()
-                if !allPaths.isEmpty {
-                    GestureOverlayWindow.shared.showTrace(paths: allPaths, fingerCount: recognizedActiveFingerCount())
-                }
-            } else if anchorPathIndex != nil {
-                // Candidate feedback owns the overlay while the hold is being evaluated.
-                // The normal live-path branch would otherwise hide it every frame because
-                // the Anchor layer is not active yet.
-            } else if appearance.showLivePath {
-                if !skipUnapproved && fullTouchSetActive {
-                    let allPaths = buildAllPaths()
-                    let totalPoints = allPaths.reduce(0) { $0 + $1.count }
-                    if totalPoints > 0 {
-                        GestureOverlayWindow.shared.showTrace(paths: allPaths, fingerCount: self.maxFingerCount)
-                    }
-                } else {
-                    GestureOverlayWindow.shared.hideTrace()
-                }
-            }
-        }
+        updateLiveTraceOverlay(editorOpen: editorOpen, skipUnapproved: skipUnapproved)
 
         // Forward live paths to AppState when editor is recording
         if editorOpen && isRecordingArmed {
@@ -1040,7 +1041,8 @@ final class TouchCaptureManager {
                 // This prevents last-moment finger drift from causing extra steps.
                 let rewindWindow = AppState.shared.recognitionSettings.continuousLiftRewind
                 if rewindWindow > 0.001 && !continuousStepHistory.isEmpty
-                    && contGesture.continuousControl != .cycleWindows {
+                    && contGesture.continuousControl != .cycleWindows
+                    && contGesture.continuousControl != .windowHorizontalTiling {
                     let cutoff = now - rewindWindow
                     let stepsToUndo = continuousStepHistory.filter { $0.time >= cutoff }
                     if !stepsToUndo.isEmpty && !AppState.shared.recognitionSettings.testMode {
@@ -1125,9 +1127,23 @@ final class TouchCaptureManager {
                 resetGesture()
             }
         } else if anyEnded && !recognitionActiveTouches.isEmpty {
-            ztLog("PARTIAL-LIFT: active=\(recognitionActiveTouches.count) raw=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount) → 0.3s timer")
-            AppState.shared.isGestureActive = false
-            scheduleCompletionTimeout()
+            if let contGesture = activeContinuousGesture,
+               contGesture.inputType == .continuous,
+               recognitionActiveTouches.count >= max(1, contGesture.fingerCount - 1) {
+                if let primary = recognitionActiveTouches.values.max(by: { $0.count < $1.count }),
+                   let last = primary.last {
+                    continuousLastPosition = contGesture.continuousAxis == .horizontal ? last.x : last.y
+                }
+                ztLog("CONT-LIFT-GRACE: active=\(recognitionActiveTouches.count) raw=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount) → 0.3s timer")
+                scheduleCompletionTimeout(reason: "continuousLiftGrace")
+            } else {
+                let reason = preLockLiftGraceActive ? "prelockLiftGrace" : "partialLift"
+                ztLog("PARTIAL-LIFT: active=\(recognitionActiveTouches.count) raw=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount) reason=\(reason) → 0.3s timer")
+                if !preLockLiftGraceActive {
+                    AppState.shared.isGestureActive = false
+                }
+                scheduleCompletionTimeout(reason: reason)
+            }
             updateCaptureFlags()
         } else if anyEnded && recognitionActiveTouches.isEmpty && completedPaths.isEmpty {
             // Fingers lifted but no paths accumulated — dead gesture, clean up
@@ -1420,6 +1436,62 @@ final class TouchCaptureManager {
         tapSequenceTimer = nil
     }
 
+    private func updateLiveTraceOverlay(editorOpen: Bool, skipUnapproved: Bool) {
+        guard !editorOpen else { return }
+
+        let appearance = AppState.shared.appearanceSettings
+        guard appearance.showLivePath else {
+            GestureOverlayWindow.shared.hideTrace()
+            return
+        }
+
+        if physicalClickActive || physicalClickTaintedGesture {
+            GestureOverlayWindow.shared.hideTrace()
+            return
+        }
+
+        if anchorActivationActive {
+            let allPaths = buildAnchorOverlayPaths()
+            if !allPaths.isEmpty {
+                GestureOverlayWindow.shared.showTrace(paths: allPaths, fingerCount: recognizedActiveFingerCount())
+            }
+            return
+        }
+
+        if anchorPathIndex != nil {
+            return
+        }
+
+        let allPaths = buildAllPaths()
+        let totalPoints = allPaths.reduce(0) { $0 + $1.count }
+        guard !skipUnapproved, totalPoints > 0 else {
+            GestureOverlayWindow.shared.hideTrace()
+            return
+        }
+
+        GestureOverlayWindow.shared.showTrace(paths: allPaths, fingerCount: recognizedActiveFingerCount())
+    }
+
+    private func clearContinuousCandidateCache() {
+        cachedContinuousCandidates = []
+        cachedPinchCandidates = []
+        cachedDialCandidates = []
+        cachedCandidateFingerCount = 0
+    }
+
+    private func refreshContinuousCandidateCache(fingerCount: Int) {
+        cachedContinuousCandidates = GestureStore.shared.gestures.filter { gesture in
+            gesture.inputType == .continuous && gesture.isEnabled && gesture.fingerCount == fingerCount
+        }
+        cachedPinchCandidates = GestureStore.shared.gestures.filter { gesture in
+            gesture.inputType == .pinch && gesture.isEnabled && gesture.fingerCount == fingerCount
+        }
+        cachedDialCandidates = GestureStore.shared.gestures.filter { gesture in
+            gesture.inputType == .dial && gesture.isEnabled && gesture.fingerCount == fingerCount
+        }
+        cachedCandidateFingerCount = fingerCount
+    }
+
     /// Called from the .listenOnly tap when a leftMouseDown fires while a finger is
     /// pressed (size >= 0.3). This is a physical trackpad click, not a tap-to-click
     /// or a resting anchor hold, so it must not trigger the overlay. We taint the
@@ -1432,6 +1504,47 @@ final class TouchCaptureManager {
         mtdLog(String(format: "PHYSICAL-CLICK detected size=%.3f -> suppress overlay/anchor", lastFingerSize))
         resetAnchorActivation(reason: "physicalClick")
         GestureOverlayWindow.shared.hideTrace()
+    }
+
+    private func startGestureLandingWindow(now: TimeInterval) {
+        gestureLandingStartedAt = now
+        landingSettledLogged = false
+        anchorCandidateAttemptedThisGesture = false
+        landingSettlementTimer?.cancel()
+        let startedAt = now
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.gestureLandingStartedAt == startedAt else { return }
+            _ = self.markLandingSettledIfNeeded(now: ProcessInfo.processInfo.systemUptime)
+            self.tryBeginSettledAnchorCandidate()
+        }
+        landingSettlementTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + gestureLandingWindow, execute: work)
+    }
+
+    private func markLandingSettledIfNeeded(now: TimeInterval) -> Bool {
+        guard gestureLandingStartedAt > 0 else { return true }
+        let elapsed = now - gestureLandingStartedAt
+        guard elapsed >= gestureLandingWindow else { return false }
+        if !landingSettledLogged && (!activeTouches.isEmpty || !completedPaths.isEmpty) {
+            ztLog("LANDING: settled elapsed=\(String(format: "%.3f", elapsed)) active=\(recognizedActiveTouches().count) raw=\(activeTouches.count) max=\(maxFingerCount)")
+            landingSettledLogged = true
+        }
+        return true
+    }
+
+    private func tryBeginSettledAnchorCandidate() {
+        guard hasAnchorActivationLayer,
+              !AppState.shared.isShowingEditor,
+              !physicalClickTaintedGesture,
+              !anchorActivationActive,
+              !anchorCandidateAttemptedThisGesture,
+              anchorPathIndex == nil,
+              maxFingerCount <= 1,
+              activeTouches.count == 1,
+              completedPaths.isEmpty,
+              let (pathIndex, path) = activeTouches.first,
+              let firstPoint = path.first else { return }
+        beginAnchorCandidate(pathIndex: pathIndex, point: firstPoint, startedAt: gestureLandingStartedAt)
     }
 
     private func handleAnchorActivationTouchBegan(pathIndex: Int32, point: PathPoint) {
@@ -1457,7 +1570,7 @@ final class TouchCaptureManager {
     /// Creates the anchor candidate for a single resting finger: zone-filters the
     /// start point, then arms the activation and visual-indicator timers. Shared
     /// by the touch-down path and the deferred (post-cooldown) re-evaluation path.
-    private func beginAnchorCandidate(pathIndex: Int32, point: PathPoint) {
+    private func beginAnchorCandidate(pathIndex: Int32, point: PathPoint, startedAt deferredStartedAt: TimeInterval? = nil) {
         // Zone filter: if the user has restricted which zones can start an anchor,
         // map the touch's start position to a 9×9 grid cell index and bail if blocked.
         // Cell index = row * 9 + col; row 0 = top (y≈1), row 8 = bottom (y≈0).
@@ -1472,29 +1585,33 @@ final class TouchCaptureManager {
             }
         }
 
+        anchorCandidateAttemptedThisGesture = true
         anchorPathIndex = pathIndex
         anchorStartPoint = point
         let delay = AppState.shared.recognitionSettings.anchorActivationDelay
+        let now = ProcessInfo.processInfo.systemUptime
+        let candidateStartedAt = deferredStartedAt ?? now
+        let elapsed = max(0, now - candidateStartedAt)
+        let remainingDelay = max(delay - elapsed, 0)
         let work = DispatchWorkItem { [weak self] in
             self?.activateAnchorIfReady()
         }
         anchorActivationTimer = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-        let candidateStartedAt = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + remainingDelay, execute: work)
         anchorCandidateStartedAt = candidateStartedAt
         anchorCandidateDelay = delay
-        // Visual indicator fires at 75% of the hold duration (min 0.20 s).
-        // Starting this close to activation means transient pauses (scrubbing, etc.)
-        // never show the bloom — only holds that are genuinely near-activation do.
-        let indicatorDelay = max(delay * 0.75, 0.20)
+        // Visual indicator fires at 75% of the hold duration. Proportional (no fixed
+        // floor) so it always schedules before the activation timer, regardless of
+        // how short the user's configured Anchor Delay is.
+        let indicatorDelay = delay * 0.75
         let indicatorWork = DispatchWorkItem { [weak self] in
             self?.updateAnchorCandidateIndicator(pathIndex: pathIndex, startedAt: candidateStartedAt, delay: delay)
         }
         anchorCandidateIndicatorTimer = indicatorWork
         if indicatorDelay < delay {
-            DispatchQueue.main.asyncAfter(deadline: .now() + indicatorDelay, execute: indicatorWork)
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(indicatorDelay - elapsed, 0), execute: indicatorWork)
         }
-        ztLog("ANCHOR-ACTIVATION: candidate path=\(pathIndex) delay=\(String(format: "%.2f", delay))")
+        ztLog("ANCHOR-ACTIVATION: candidate path=\(pathIndex) delay=\(String(format: "%.2f", delay)) elapsed=\(String(format: "%.3f", elapsed))")
     }
 
     private func updateAnchorCandidateIndicator(pathIndex: Int32, startedAt: TimeInterval, delay: TimeInterval) {
@@ -1505,7 +1622,7 @@ final class TouchCaptureManager {
               !anchorMovedBeyondTolerance(anchorPath) else { return }
 
         let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
-        let visibleStart = max(delay * 0.75, 0.20)
+        let visibleStart = delay * 0.75
         let visibleDuration = max(delay - visibleStart, 0.01)
         let progress = min(max((elapsed - visibleStart) / visibleDuration, 0), 1)
         GestureOverlayWindow.shared.showAnchorCandidate(progress: progress)
@@ -1572,6 +1689,10 @@ final class TouchCaptureManager {
         anchorActivationTimer?.cancel()
         anchorActivationTimer = nil
         AppState.shared.isGestureActive = true
+        // Freeze the visible cursor for the duration of the anchor hold: capture its
+        // position now; the event tap warps it back on every movement event. See
+        // anchorFrozenCursorPos for why event-blocking/disassociation are not enough.
+        anchorFrozenCursorPos = CGEvent(source: nil)?.location
         ztLog("ANCHOR-ACTIVATION: ON path=\(anchorPathIndex) dist=\(String(format: "%.4f", anchorDistanceFromStart(anchorPath)))")
         let allPaths = buildAnchorOverlayPaths()
         GestureOverlayWindow.shared.showTrace(paths: allPaths.isEmpty ? [visibleAnchorPath(anchorPath)] : allPaths, fingerCount: recognizedActiveFingerCount())
@@ -1652,6 +1773,7 @@ final class TouchCaptureManager {
         if anchorPathIndex != nil || anchorActivationActive {
             ztLog("ANCHOR-ACTIVATION: OFF reason=\(reason) active=\(anchorActivationActive)")
         }
+        anchorFrozenCursorPos = nil
         anchorActivationTimer?.cancel()
         anchorActivationTimer = nil
         anchorCandidateIndicatorTimer?.cancel()
@@ -1682,6 +1804,11 @@ final class TouchCaptureManager {
         logDiag("RESET active=\(activeTouches.count) completed=\(completedPaths.count) modAct=\(modifierActivated)")
         completionTimer?.cancel()
         completionTimer = nil
+        landingSettlementTimer?.cancel()
+        landingSettlementTimer = nil
+        gestureLandingStartedAt = 0
+        landingSettledLogged = false
+        anchorCandidateAttemptedThisGesture = false
         resetAnchorActivation(reason: "gestureReset")
         // Safety net: ensure Mission Control (Cycle Windows overview) is never left
         // open if the gesture ended via an edge path. Idempotent — no-op if closed.
@@ -1757,11 +1884,11 @@ final class TouchCaptureManager {
         handleGestureComplete(primaryPath: primaryPath, fingerCount: fingers, paths: paths)
     }
 
-    private func scheduleCompletionTimeout() {
-        ztLog("COMPLETION-TIMER: scheduled 0.3s (active=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount))")
+    private func scheduleCompletionTimeout(reason: String) {
+        ztLog("COMPLETION-TIMER: scheduled 0.3s reason=\(reason) (active=\(activeTouches.count) completed=\(completedPaths.count) fingers=\(maxFingerCount))")
         completionTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            ztLog("COMPLETION-TIMER: fired")
+            ztLog("COMPLETION-TIMER: fired reason=\(reason)")
             self?.finalizeGesture()
         }
         completionTimer = work
@@ -1792,8 +1919,22 @@ final class TouchCaptureManager {
             0.32
         case .scrollDesktops:
             0.18
+        case .windowHorizontalTiling:
+            0.40
         default:
             0.03
+        }
+    }
+
+    private func continuousStepThreshold(for gesture: GestureDefinition) -> Double {
+        switch gesture.continuousControl {
+        case .windowHorizontalTiling:
+            // Floor well below the slider's finest value (0.02) so the sensitivity
+            // setting actually has range. A 0.18 floor swallowed the whole slider,
+            // forcing an unnecessarily long swipe at every setting.
+            max(gesture.continuousStepThreshold, 0.05)
+        default:
+            gesture.continuousStepThreshold
         }
     }
 
@@ -2120,6 +2261,8 @@ final class TouchCaptureManager {
             | (1 << CGEventType.otherMouseDown.rawValue)
             | (1 << CGEventType.otherMouseUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.mouseMoved.rawValue)
+            | (1 << CGEventType.leftMouseDragged.rawValue)
         for t: UInt32 in [18, 27, 29, 30, 31, 32, 33, 34, 37] {
             eventMask |= (1 << t)
         }
@@ -2160,6 +2303,30 @@ final class TouchCaptureManager {
                     return Unmanaged.passUnretained(event)  // always pass through
                 }
 
+                // While the anchor hold is active, a second finger drawing a gesture
+                // is ALSO interpreted by macOS as ordinary pointer movement (the anchor
+                // finger is treated as resting/palm), which drags the system cursor.
+                // Swallow the event AND warp the cursor back to where it was when the
+                // anchor activated — the WindowServer moves the trackpad cursor even
+                // when these events are blocked, so warping back is the only reliable
+                // way to keep it still. Outside an anchor hold, pass through untouched.
+                if type == .mouseMoved || type == .leftMouseDragged {
+                    if mgr.anchorActivationActive {
+                        // Synthetic events posted by our own process (e.g. the
+                        // move-window-to-desktop drag in WindowManager) must pass
+                        // through — only physical trackpad movement is frozen.
+                        let sourcePid = event.getIntegerValueField(.eventSourceUnixProcessID)
+                        if sourcePid == Int64(getpid()) {
+                            return Unmanaged.passUnretained(event)
+                        }
+                        if let frozen = mgr.anchorFrozenCursorPos {
+                            CGWarpMouseCursorPosition(frozen)
+                        }
+                        return nil
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+
                 // Determine whether to block system events:
                 // - If any non-alwaysOn layer's modifier is held AND we're capturing → block
                 // - If all active layers are Always On → only block during continuous session
@@ -2194,10 +2361,11 @@ final class TouchCaptureManager {
                     // modifier spikes from suppressing normal two-finger scrolling.
                     shouldBlock = mgr.isCapturingGesture || mgr.globalFnActive
                 } else if hasAlwaysOnSystemGestureLayer && isNativeGestureEvent {
-                    // Native Space/Mission Control swipes can arrive before the raw
-                    // multitouch callback has raised isAlwaysOnMultitouch. If a 3+
-                    // Always On layer exists, own those gesture/swipe events up front.
-                    shouldBlock = true
+                    // Safari back/forward uses native two-finger swipe events too.
+                    // Only own native gestures once the raw touch stream shows a
+                    // 3+ finger Always On gesture; otherwise normal app gestures
+                    // get their initial animation and then are cancelled by us.
+                    shouldBlock = mgr.isAlwaysOnMultitouch
                 } else if mgr.isAlwaysOnMultitouch {
                     // 3+ fingers on Always On layer: block immediately to prevent
                     // macOS from interpreting as 2-finger scroll

@@ -76,8 +76,10 @@ final class GestureStore {
 
     private func load() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            // First launch — seed with mock data
-            gestures = GestureDefinition.mockData
+            // First launch — prefer the recorded starter library shipped with
+            // release builds, then fall back to the small in-code examples used
+            // by local/development builds.
+            gestures = loadBundledStarterGestures() ?? GestureDefinition.mockData
             save()
             return
         }
@@ -88,5 +90,15 @@ final class GestureStore {
             print("[GestureStore] Load failed: \(error)")
             gestures = []
         }
+    }
+
+    private func loadBundledStarterGestures() -> [GestureDefinition]? {
+        guard let url = Bundle.main.url(forResource: "starter-gestures", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([GestureDefinition].self, from: data),
+              !decoded.isEmpty else {
+            return nil
+        }
+        return decoded
     }
 }

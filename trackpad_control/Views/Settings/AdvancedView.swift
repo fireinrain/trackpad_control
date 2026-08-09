@@ -66,8 +66,7 @@ struct AdvancedView: View {
                         .foregroundStyle(.tertiary)
                     Spacer()
                     Button("Clear Log") {
-                        let path = NSHomeDirectory() + "/Library/Application Support/TrackpadControl/tc-debug.log"
-                        try? "".write(toFile: path, atomically: true, encoding: .utf8)
+                        clearDiagnosticsLog()
                     }
                     .font(.caption2)
                     .help("Erase the diagnostics log file so the next test starts clean.")

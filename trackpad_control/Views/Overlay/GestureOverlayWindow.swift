@@ -68,6 +68,7 @@ final class GestureOverlayWindow {
         } else {
             // Seamless handoff from the emerging anchor-candidate pad — it is already
             // on screen at full size, so the trace just starts drawing inside it.
+            overlayView.prepareForEmerge()
             logDecision("REFRESH showTrace desktopIdx=\(WindowManager.currentSpaceIdx) fingers=\(fingerCount)")
             overlayView.needsDisplay = true
             window?.orderFrontRegardless()
@@ -76,7 +77,6 @@ final class GestureOverlayWindow {
 
     func hideTrace() {
         guard isShowing else {
-            logDecision("HIDE requested while not showing desktopIdx=\(WindowManager.currentSpaceIdx)")
             overlayView.paths = []
             overlayView.fingerCount = 0
             overlayView.needsDisplay = true

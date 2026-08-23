@@ -173,7 +173,7 @@ workflow 已强制 `ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO` 并用 `lipo -arch
   `recordingUpdateCounter` 驱动的刷新）、完成后可保存
 - ⬜ 四类动作实际触发：键盘快捷键 / 启动 App / 窗口管理 / 连续操作
 - ⬜ 覆盖层轨迹绘制正常；诊断自测通过：
-  `TC_OVERLAY_SELF_TEST=1 open -a trackpad_control`
+  `TC_OVERLAY_SELF_TEST=1 open -a "Trackpad Control"`
 - ⬜ 设置窗口：四个标签页切换正常、空列表占位视图观感可接受
   （`UnavailableStateView` 的 12/13 替身布局）
 - ⬜ 导入/导出 JSON 往返一致（含 51 个预录手势的 starter-gestures.json）

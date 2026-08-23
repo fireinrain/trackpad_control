@@ -8,7 +8,7 @@ It is built for power users who want gesture automation on Mac without opening f
 
 [**→ Download trackpad_control.zip from the latest release**](https://github.com/Smoep/trackpad_control/releases/latest)
 
-Unzip and drag **trackpad_control.app** to your Applications folder. New installs
+Unzip and drag **Trackpad Control.app** to your Applications folder. New installs
 from the prebuilt release start with a library of 51 recorded gestures, so you can
 enable, adapt, or delete examples instead of recording everything from scratch.
 
@@ -36,8 +36,8 @@ git clone https://github.com/Smoep/trackpad_control.git
 cd trackpad_control
 xcodebuild -project trackpad_control.xcodeproj -scheme trackpad_control -configuration Release \
   -derivedDataPath build-release build
-cp -R build-release/Build/Products/Release/trackpad_control.app /Applications/trackpad_control.app
-open /Applications/trackpad_control.app
+cp -R "build-release/Build/Products/Release/Trackpad Control.app" /Applications/"Trackpad Control.app"
+open "/Applications/Trackpad Control.app"
 ```
 
 ## Keywords

@@ -55,8 +55,8 @@ jobs:
 
       - name: Verify minimum OS version and architectures
         run: |
-          APP=build-release/Build/Products/Release/trackpad_control.app
-          BIN="$APP/Contents/MacOS/trackpad_control"
+          APP="build-release/Build/Products/Release/Trackpad Control.app"
+          BIN="$APP/Contents/MacOS/Trackpad Control"
           echo "--- binary build metadata ---"
           vtool -show-build "$BIN"
           MINOS=$(vtool -show-build "$BIN" | awk '/minos/ {print $NF}')
@@ -76,7 +76,7 @@ jobs:
       - name: Package app
         run: |
           cd build-release/Build/Products/Release
-          zip -r -q "$GITHUB_WORKSPACE/trackpad_control.zip" trackpad_control.app
+          zip -r -q "$GITHUB_WORKSPACE/trackpad_control.zip" "Trackpad Control.app"
           shasum -a 256 "$GITHUB_WORKSPACE/trackpad_control.zip"
 
       - name: Publish GitHub Release

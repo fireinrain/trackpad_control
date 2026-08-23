@@ -82,9 +82,10 @@ Phase 1  机械改动     pbxproj 目标版本、onChange ×7、                
 Phase 2  设置窗口     NavigationSplitView 分支、sidebarToggle、       ✅ 完成
                       ContentUnavailableView 替身
 Phase 3  菜单栏入口   双轨：MenuBarExtra(13+) / NSStatusItem(12)      ✅ 完成
-Phase 4  回归验证     12.7（本机真机）+ 13/14/15 + 26 测试矩阵：      ⏳ 待 Xcode 26 环境构建后执行
-                      录制、识别触发、覆盖层显示、导入导出、开机启动、内存
-                      （参考 docs/macos-low-memory-playbook.md）
+Phase 4  回归验证     12.7（本机真机）+ 13/14/15 + 26 测试矩阵：      🔄 进行中
+                      （2026-08-23：CI 构建✅ 双架构校验✅、
+                       Intel Mac 12.7 安装并启动运行✅；
+                       功能级回归见第九节清单，逐项执行中）
 Phase 5  文档         README / docs 更新                              ✅ 完成（README 已更新）
 ```
 

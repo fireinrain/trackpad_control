@@ -132,9 +132,11 @@ final class TouchCaptureManager {
     /// Prevents non-modifier touches from piggybacking on a modifier gesture.
     private var modifierActivated = false
 
-    /// Thread-safe flags read by the event tap callback.
-    /// Since all processing now runs on the main thread, these are always
-    /// consistent with the event tap callback (also main thread).
+    /// Flags read by the event tap callback (which runs on a dedicated tap
+    /// thread, not main). Writes happen from main (touch processing, modifier
+    /// poll) and from the tap thread itself; all of these are word-sized
+    /// primitives so the races are benign — staleness of one poll tick is
+    /// acceptable for blocking decisions.
     private(set) var isCapturingGesture = false
     private(set) var isContinuousSession = false
     private(set) var isAlwaysOnMultitouch = false
@@ -289,6 +291,8 @@ final class TouchCaptureManager {
     // CGEventTap for blocking system trackpad gestures while modifier is held
     private var eventTap: CFMachPort?
     private var tapRunLoopSource: CFRunLoopSource?
+    private var tapRunLoop: CFRunLoop?
+    private var tapThread: Thread?
 
     private init() {
         loadFramework()
@@ -2406,7 +2410,23 @@ final class TouchCaptureManager {
         eventTap = tap
         let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
         tapRunLoopSource = src
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        // Run the tap on a dedicated background thread. The tap sits at
+        // .cghidEventTap head-insert, so every scroll/gesture/mouse-move event in
+        // the system flows through its callback; scheduling it on the main
+        // runloop made any AppKit/SwiftUI stall there delay the entire input
+        // pipeline, visible as dropped frames in system animations (Spaces
+        // swipes). The callback only touches plain stored properties and CG
+        // calls, so it is safe to run off-main.
+        let thread = Thread { [weak self] in
+            guard let self, let src = self.tapRunLoopSource else { return }
+            let rl = CFRunLoopGetCurrent()
+            self.tapRunLoop = rl
+            CFRunLoopAddSource(rl, src, .commonModes)
+            CFRunLoopRun()
+        }
+        thread.name = "com.trackpadcontrol.eventtap"
+        tapThread = thread
+        thread.start()
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
@@ -2414,10 +2434,13 @@ final class TouchCaptureManager {
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
-        if let src = tapRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
+        if let src = tapRunLoopSource, let rl = tapRunLoop {
+            CFRunLoopRemoveSource(rl, src, .commonModes)
+            CFRunLoopStop(rl)
         }
         eventTap = nil
         tapRunLoopSource = nil
+        tapRunLoop = nil
+        tapThread = nil
     }
 }

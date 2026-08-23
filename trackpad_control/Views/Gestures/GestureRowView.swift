@@ -145,7 +145,10 @@ struct GestureThumbnailView: View {
         Canvas { context, size in
             guard let sample, !sample.pathPoints.isEmpty else {
                 let center = CGPoint(x: size.width / 2, y: size.height / 2)
-                let text = Text("?").font(.caption).foregroundStyle(.tertiary)
+                // TC_COMPAT(macOS 12): foregroundStyle on Text returns `some View`
+                // under the macOS 12 SDK resolution, which Canvas.draw rejects;
+                // foregroundColor keeps the chain Text-typed on every OS.
+                let text = Text("?").font(.caption).foregroundColor(.secondary)
                 context.draw(text, at: center)
                 return
             }

@@ -33,6 +33,17 @@ extension View {
             self
         }
     }
+
+    /// TC_COMPAT(<13): `contentTransition(.numericText())` requires macOS 13;
+    /// plain no-op transition below.
+    @ViewBuilder
+    func tcNumericTextTransition() -> some View {
+        if #available(macOS 13.0, *) {
+            contentTransition(.numericText())
+        } else {
+            self
+        }
+    }
 }
 
 /// TC_COMPAT(<14): stand-in for `ContentUnavailableView` (macOS 14+).

@@ -138,7 +138,8 @@ struct TrackpadRecorderView: View {
                         Text("\(countdown)")
                             .font(.system(size: 40, weight: .bold, design: .rounded))
                             .foregroundStyle(.blue)
-                            .contentTransition(.numericText())
+                            // TC_COMPAT(<13): contentTransition needs macOS 13
+                            .tcNumericTextTransition()
                     } else {
                         Image(systemName: "hand.point.up")
                             .font(.title2)

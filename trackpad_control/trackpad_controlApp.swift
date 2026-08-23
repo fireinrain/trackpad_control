@@ -17,10 +17,13 @@ enum AppEntry {
 // TC_COMPAT(<13): availability gate only — scene identical to the original app.
 @available(macOS 13.0, *)
 struct ModernApp: App {
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
+    // TC_COMPAT(<14): ObservableObject migration — observe nested settings so
+    // the menu bar icon switches with tracking state.
+    @ObservedObject private var rs = AppState.shared.recognitionSettings
 
     var body: some Scene {
-        MenuBarExtra("Trackpad Control", systemImage: appState.recognitionSettings.isTracking ? "hand.point.up.braille.fill" : "hand.point.up.braille") {
+        MenuBarExtra("Trackpad Control", systemImage: rs.isTracking ? "hand.point.up.braille.fill" : "hand.point.up.braille") {
             MenuBarContentView()
         }
         .menuBarExtraStyle(.menu)

@@ -1,51 +1,63 @@
 import Foundation
 import SwiftUI
+import Combine
 
-@Observable
-final class AppState {
+// TC_COMPAT(<14): @Observable macro requires macOS 14; ObservableObject/@Published
+// (Combine) works on every supported version and drives the same view updates.
+final class AppState: ObservableObject {
     static let shared = AppState()
 
-    var selectedTab: SettingsTab = .gestures
-    var recognitionSettings = RecognitionSettings()
-    var appearanceSettings = AppearanceSettings()
+    private var storeCancellable: AnyCancellable?
+
+    private init() {
+        // Re-publish gesture store changes so views observing AppState alone
+        // still refresh when the underlying store mutates.
+        storeCancellable = gestureStore.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    @Published var selectedTab: SettingsTab = .gestures
+    @Published var recognitionSettings = RecognitionSettings()
+    @Published var appearanceSettings = AppearanceSettings()
     let gestureStore = GestureStore.shared
 
     // Editor state
-    var editingGesture: GestureDefinition?
-    var isShowingEditor: Bool = false
-    var isCreatingNew: Bool = false
+    @Published var editingGesture: GestureDefinition?
+    @Published var isShowingEditor: Bool = false
+    @Published var isCreatingNew: Bool = false
 
     // Recognition telemetrics (updated on each gesture completion)
-    var lastGestureFingerCount: Int = 0
-    var lastGesturePointCount: Int = 0
-    var lastMatchName: String = ""
-    var lastMatchScore: Double = 0
-    var lastMatchTurnCount: Int = 0
-    var lastGestureTimestamp: Date?
-    var lastAllScores: [(name: String, score: Double)] = []
-    var lastGestureStartX: Double = 0
-    var lastGestureStartY: Double = 0
-    var lastGestureEndX: Double = 0
-    var lastGestureEndY: Double = 0
-    var lastGesturePathLength: Double = 0
+    @Published var lastGestureFingerCount: Int = 0
+    @Published var lastGesturePointCount: Int = 0
+    @Published var lastMatchName: String = ""
+    @Published var lastMatchScore: Double = 0
+    @Published var lastMatchTurnCount: Int = 0
+    @Published var lastGestureTimestamp: Date?
+    @Published var lastAllScores: [(name: String, score: Double)] = []
+    @Published var lastGestureStartX: Double = 0
+    @Published var lastGestureStartY: Double = 0
+    @Published var lastGestureEndX: Double = 0
+    @Published var lastGestureEndY: Double = 0
+    @Published var lastGesturePathLength: Double = 0
 
     // Live telemetrics (updated each frame during gesture)
-    var liveX: Double = 0
-    var liveY: Double = 0
-    var isGestureActive: Bool = false
+    @Published var liveX: Double = 0
+    @Published var liveY: Double = 0
+    @Published var isGestureActive: Bool = false
 
     // Recording state (set by TrackpadRecorderView, read by TCM)
-    var isRecordingArmed: Bool = false
-    var recordingLivePaths: [[PathPoint]] = []
-    var recordingLiveFingerCount: Int = 0
-    var recordingUpdateCounter: Int = 0  // incremented on each live update
-    var recordingCompletionCounter: Int = 0  // incremented when recording completes
-    var recordedPaths: [[PathPoint]]?  // nil until gesture completes
-    var recordedFingerCount: Int = 0
+    @Published var isRecordingArmed: Bool = false
+    @Published var recordingLivePaths: [[PathPoint]] = []
+    @Published var recordingLiveFingerCount: Int = 0
+    @Published var recordingUpdateCounter: Int = 0  // incremented on each live update
+    @Published var recordingCompletionCounter: Int = 0  // incremented when recording completes
+    @Published var recordedPaths: [[PathPoint]]?  // nil until gesture completes
+    @Published var recordedFingerCount: Int = 0
 
-    private init() {}
 
-    var gestures: [GestureDefinition] {
+
+    @Published var gestures: [GestureDefinition] {
         get { gestureStore.gestures }
     }
 
@@ -94,9 +106,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case advanced = "Advanced"
 
-    var id: String { rawValue }
+    @Published var id: String { rawValue }
 
-    var icon: String {
+    @Published var icon: String {
         switch self {
         case .gestures: "rectangle.3.group"
         case .recognition: "brain.head.profile"

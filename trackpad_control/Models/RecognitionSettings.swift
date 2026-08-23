@@ -1,11 +1,11 @@
 import Foundation
+import Combine
 
-@Observable
-final class RecognitionSettings {
+final class RecognitionSettings: ObservableObject {
     private static let d = UserDefaults.standard
     private var isInitialized = false
 
-    var isTracking: Bool = true {
+    @Published var isTracking: Bool = true {
         didSet {
             Self.d.set(isTracking, forKey: "rs_isTracking")
             guard isInitialized else { return }
@@ -17,19 +17,19 @@ final class RecognitionSettings {
         }
     }
     // Per-finger-count activation layers (1–5 fingers)
-    var layer1Key: LayerActivation = .fn {
+    @Published var layer1Key: LayerActivation = .fn {
         didSet { Self.d.set(layer1Key.rawValue, forKey: "rs_layer1Key") }
     }
-    var layer2Key: LayerActivation = .fn {
+    @Published var layer2Key: LayerActivation = .fn {
         didSet { Self.d.set(layer2Key.rawValue, forKey: "rs_layer2Key") }
     }
-    var layer3Key: LayerActivation = .alwaysOn {
+    @Published var layer3Key: LayerActivation = .alwaysOn {
         didSet { Self.d.set(layer3Key.rawValue, forKey: "rs_layer3Key") }
     }
-    var layer4Key: LayerActivation = .alwaysOn {
+    @Published var layer4Key: LayerActivation = .alwaysOn {
         didSet { Self.d.set(layer4Key.rawValue, forKey: "rs_layer4Key") }
     }
-    var layer5Key: LayerActivation = .alwaysOn {
+    @Published var layer5Key: LayerActivation = .alwaysOn {
         didSet { Self.d.set(layer5Key.rawValue, forKey: "rs_layer5Key") }
     }
 
@@ -44,10 +44,10 @@ final class RecognitionSettings {
         }
     }
     // -- Discrete --
-    var discreteConfidence: Double = 0.80 {
+    @Published var discreteConfidence: Double = 0.80 {
         didSet { Self.d.set(discreteConfidence, forKey: "rs_discreteConfidence") }
     }
-    var discreteMinLength: Double = 0.5 {
+    @Published var discreteMinLength: Double = 0.5 {
         didSet { Self.d.set(discreteMinLength, forKey: "rs_discreteMinLength") }
     }
     /// Minimum score gap required between the top two *different* confident
@@ -55,50 +55,50 @@ final class RecognitionSettings {
     /// ambiguous ("doesn't fit neatly") and suppressed instead of firing a
     /// coin-flip. Clean gestures separate by >=0.10 in practice; genuine
     /// ambiguity clusters within ~0.02, so 0.06 sits safely between.
-    var discreteAmbiguityMargin: Double = 0.06 {
+    @Published var discreteAmbiguityMargin: Double = 0.06 {
         didSet { Self.d.set(discreteAmbiguityMargin, forKey: "rs_discreteAmbiguityMargin") }
     }
     // -- Location --
-    var locationConfidence: Double = 0.75 {
+    @Published var locationConfidence: Double = 0.75 {
         didSet { Self.d.set(locationConfidence, forKey: "rs_locationConfidence") }
     }
-    var locationMinLength: Double = 0.3 {
+    @Published var locationMinLength: Double = 0.3 {
         didSet { Self.d.set(locationMinLength, forKey: "rs_locationMinLength") }
     }
-    var locationRadius: Double = 0.20 {
+    @Published var locationRadius: Double = 0.20 {
         didSet { Self.d.set(locationRadius, forKey: "rs_locationRadius") }
     }
     /// Maximum time (seconds) between consecutive zone taps in a multi-tap
     /// sequence. Lower values reduce accidental "follow-up" taps but may make
     /// double/triple taps harder to perform.
-    var zoneTapWindow: Double = 0.4 {
+    @Published var zoneTapWindow: Double = 0.4 {
         didSet { Self.d.set(zoneTapWindow, forKey: "rs_zoneTapWindow") }
     }
-    var anchorActivationDelay: Double = 0.40 {
+    @Published var anchorActivationDelay: Double = 0.40 {
         didSet { Self.d.set(anchorActivationDelay, forKey: "rs_anchorActivationDelay") }
     }
     /// How far the anchor finger may drift (fraction of the trackpad, ~0–1) while
     /// held before the anchor/overlay is cancelled. Small natural wiggles stay
     /// within this; a deliberate slide exceeds it and returns to normal usage.
     /// Applies both while counting down and once active. ~0.10 ≈ 1cm on the pad.
-    var anchorHoldTolerance: Double = 0.08 {
+    @Published var anchorHoldTolerance: Double = 0.08 {
         didSet { Self.d.set(anchorHoldTolerance, forKey: "rs_anchorHoldTolerance") }
     }
     /// Cells of a 9×9 trackpad grid that are allowed to start an anchor hold.
     /// Cell index = row * 9 + col, where row 0 = top, col 0 = left.
     /// Defaults to all 81 cells (no restriction). Remove cells to block accidental
     /// activation from a resting palm. An empty set is treated as "all allowed".
-    var anchorAllowedZones: Set<Int> = Set(0..<81) {
+    @Published var anchorAllowedZones: Set<Int> = Set(0..<81) {
         didSet {
             let raw = anchorAllowedZones.sorted().map(String.init).joined(separator: ",")
             Self.d.set(raw, forKey: "rs_anchorAllowedZones9")
         }
     }
     // -- Continuous --
-    var continuousLiftRewind: Double = 0.08 {
+    @Published var continuousLiftRewind: Double = 0.08 {
         didSet { Self.d.set(continuousLiftRewind, forKey: "rs_continuousLiftRewind") }
     }
-    var testMode: Bool = false {
+    @Published var testMode: Bool = false {
         didSet { Self.d.set(testMode, forKey: "rs_testMode") }
     }
 

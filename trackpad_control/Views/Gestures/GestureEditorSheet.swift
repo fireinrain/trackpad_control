@@ -3,7 +3,7 @@ import SwiftUI
 struct GestureEditorSheet: View {
     @State var gesture: GestureDefinition
     let isNew: Bool
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
     @State private var previewSample: GestureSample?
 
     private var needsRecorder: Bool {

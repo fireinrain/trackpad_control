@@ -3,7 +3,7 @@ import SwiftUI
 struct TrackpadRecorderView: View {
     @Binding var samples: [GestureSample]
     @Binding var previewSample: GestureSample?
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
     @State private var fingerPaths: [[PathPoint]] = []
     @State private var currentFingerCount: Int = 0
     @State private var isArmed = false

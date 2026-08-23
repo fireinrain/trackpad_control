@@ -2,7 +2,7 @@ import SwiftUI
 
 struct GestureRowView: View {
     let gesture: GestureDefinition
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
     @State private var isHovering = false
 
     var body: some View {

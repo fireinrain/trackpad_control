@@ -1,5 +1,5 @@
 import AppKit
-import Observation
+import Combine
 
 /// TC_COMPAT(<13): macOS 12 fallback entry replacing `MenuBarExtra` (macOS 13+).
 /// Mirrors the `.menuBarExtraStyle(.menu)` presentation with a native
@@ -11,6 +11,7 @@ import Observation
 final class LegacyMenuBarController: NSObject {
     static let shared = LegacyMenuBarController()
 
+    private var cancellable: AnyCancellable?
     private var statusItem: NSStatusItem?
     private weak var trackingItem: NSMenuItem?
 
@@ -67,16 +68,12 @@ final class LegacyMenuBarController: NSObject {
         statusItem?.button?.image = NSImage(systemSymbolName: iconName(), accessibilityDescription: "Trackpad Control")
     }
 
-    /// Manual observation loop — keeps @Observable state in sync outside SwiftUI.
+    /// TC_COMPAT(<14): ObservableObject migration — Combine subscription
+    /// replaces the Observation-framework tracking loop (which requires macOS 14).
     private func observeTrackingState() {
-        withObservationTracking {
-            _ = AppState.shared.recognitionSettings.isTracking
-        } onChange: {
-            Task { @MainActor in
-                LegacyMenuBarController.shared.refreshState()
-                LegacyMenuBarController.shared.observeTrackingState()
-            }
-        }
+        cancellable = AppState.shared.recognitionSettings.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshState() }
     }
 
     // MARK: - Actions

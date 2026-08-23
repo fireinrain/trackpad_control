@@ -24,7 +24,7 @@
 | 动作执行 (`Actions/*`) | CGEvent tap、AXUIElement、Carbon HIToolbox、NSWorkspace | ✅ |
 | 覆盖层 (`GestureOverlayWindow`) | borderless NSWindow + level + collectionBehavior | ✅ |
 | 持久化 (`GestureStore`) | Foundation JSON | ✅ |
-| `@Observable` ×4 类 | Observation 框架 | ✅ Apple 官方回溯部署至 macOS 10.15（Xcode 15+ SDK），无需改写 ObservableObject |
+| `@Observable` ×4 类 | Observation 框架 | ❌ **已被 CI 证伪**：`Observable()` 宏标注为 macOS 14+，无回溯部署。已迁移至 `ObservableObject/@Published`（见实施记录 v2） |
 | Swift 并发 + `SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor` | Xcode 26 编译器选项 | ✅ 与目标系统版本无关 |
 | 图标资产 | 传统 AppIcon.appiconset（非 Icon Composer） | ✅ |
 | SF Symbols 53 个中的 49 个 | 实测验证（name_availability.plist + AppKit 运行时，macOS 12.7 本机） | ✅ |
@@ -88,7 +88,22 @@ Phase 4  回归验证     12.7（本机真机）+ 13/14/15 + 26 测试矩阵： 
 Phase 5  文档         README / docs 更新                              ✅ 完成（README 已更新）
 ```
 
-### 实施记录（2026-08-23）
+### 实施记录 v2（CI 首次构建失败后的修复，2026-08-23）
+
+**发现 1 — @Observable 不可回溯部署**：CI 报错 `'Observable()' is only available in macOS 14.0 or newer`。
+原报告中"Observation 框架官方回溯部署至 10.15"的判断错误。修复：
+- `AppState` / `RecognitionSettings` / `AppearanceSettings` / `GestureStore` 全部迁移为
+  `ObservableObject + @Published`（Combine，macOS 10.15+ 全兼容）
+- AppState 通过 `objectWillChange` 转发 GestureStore 的变化，保持视图刷新链路不变
+- 嵌套对象语义差异处理：读取/绑定嵌套设置的视图各自持有专属 `@ObservedObject`
+  （RecognitionView→rs、AppearanceView→aps、MenuBarContentView→rs、ModernApp→rs）
+- LegacyMenuBarController 改用 Combine 订阅替代 Observation 跟踪循环
+
+**发现 2 — CI runner 为 Apple Silicon**：用户机器是 Intel Mac，必须保证产物含 x86_64。
+workflow 已强制 `ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO` 并用 `lipo -archs` 校验双架构，
+缺失任一架构即失败；另增加 build.log 失败时自动上传，便于无 gh CLI 时排查。
+
+### 实施记录 v1（2026-08-23）
 
 **新增文件**
 - `trackpad_control/Support/Compatibility.swift` — `tcOnChange` 兼容包装（内部走旧式

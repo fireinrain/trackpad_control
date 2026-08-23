@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct AppearanceView: View {
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
+    // TC_COMPAT(<14): ObservableObject migration — nested settings need their
+    // own observer so view updates (and Bindings) track property changes.
+    @ObservedObject private var aps = AppState.shared.appearanceSettings
 
     var body: some View {
         ScrollView {
@@ -19,7 +22,7 @@ struct AppearanceView: View {
         SettingsSection(title: "OVERLAY") {
             SettingsSlider(
                 label: "Background Opacity",
-                value: $appState.appearanceSettings.overlayBackgroundOpacity,
+                value: $aps.overlayBackgroundOpacity,
                 range: 0.0...1.0,
                 step: 0.05,
                 help: "How opaque the overlay background panel appears.",
@@ -27,7 +30,7 @@ struct AppearanceView: View {
             )
             SettingsSlider(
                 label: "Overlay Size",
-                value: $appState.appearanceSettings.overlaySize,
+                value: $aps.overlaySize,
                 range: 0.5...2.0,
                 step: 0.1,
                 help: "Scale of the gesture overlay. Trackpad aspect ratio is always maintained.",
@@ -42,7 +45,7 @@ struct AppearanceView: View {
         SettingsSection(title: "GESTURE TRACE") {
             SettingsSlider(
                 label: "Trace Thickness",
-                value: $appState.appearanceSettings.traceThickness,
+                value: $aps.traceThickness,
                 range: 1.0...6.0,
                 step: 0.5,
                 help: "Width of the drawn gesture path.",
@@ -51,12 +54,12 @@ struct AppearanceView: View {
 
             SettingsSlider(
                 label: "Trace Opacity",
-                value: $appState.appearanceSettings.traceOpacity,
+                value: $aps.traceOpacity,
                 range: 0.1...1.0,
                 help: "Visibility of the gesture path while drawing."
             )
 
-            Toggle("Show live path during normal use", isOn: $appState.appearanceSettings.showLivePath)
+            Toggle("Show live path during normal use", isOn: $aps.showLivePath)
                 .toggleStyle(.switch)
                 .help("Draw gesture paths on screen as you perform them outside of Settings.")
         }

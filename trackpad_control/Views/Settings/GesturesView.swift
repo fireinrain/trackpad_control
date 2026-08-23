@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GesturesView: View {
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
     @State private var searchText = ""
     @State private var filterMode: FilterMode = .all
     @State private var fingerFilter: Int? = nil

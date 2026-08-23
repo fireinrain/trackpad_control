@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct RecognitionView: View {
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
+    // TC_COMPAT(<14): ObservableObject migration — nested settings need their
+    // own observer so view updates (and Bindings) track property changes.
+    @ObservedObject private var rs = AppState.shared.recognitionSettings
 
     var body: some View {
         ScrollView {
@@ -21,18 +24,18 @@ struct RecognitionView: View {
         SettingsSection(title: "STATUS") {
             HStack {
                 Label(
-                    appState.recognitionSettings.isTracking ? "Active" : "Paused",
-                    systemImage: appState.recognitionSettings.isTracking
+                    rs.isTracking ? "Active" : "Paused",
+                    systemImage: rs.isTracking
                         ? "bolt.circle.fill" : "pause.circle"
                 )
                 .foregroundStyle(
-                    appState.recognitionSettings.isTracking ? .green : .secondary
+                    rs.isTracking ? .green : .secondary
                 )
                 .font(.body.weight(.medium))
 
                 Spacer()
 
-                Toggle("", isOn: $appState.recognitionSettings.isTracking)
+                Toggle("", isOn: $rs.isTracking)
                     .toggleStyle(.switch)
                     .labelsHidden()
             }
@@ -43,19 +46,19 @@ struct RecognitionView: View {
                     systemImage: "testtube.2"
                 )
                 .foregroundStyle(
-                    appState.recognitionSettings.testMode ? .orange : .secondary
+                    rs.testMode ? .orange : .secondary
                 )
                 .font(.body.weight(.medium))
 
                 Spacer()
 
-                Toggle("", isOn: $appState.recognitionSettings.testMode)
+                Toggle("", isOn: $rs.testMode)
                     .toggleStyle(.switch)
                     .labelsHidden()
             }
             .help("Gestures are recognized but actions are not executed")
 
-            if appState.recognitionSettings.testMode {
+            if rs.testMode {
                 Text("Actions disabled — gestures will register without executing.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
@@ -129,7 +132,7 @@ struct RecognitionView: View {
                                         RoundedRectangle(cornerRadius: 2)
                                             .fill(Color.primary.opacity(0.06))
                                         RoundedRectangle(cornerRadius: 2)
-                                            .fill(item.score >= appState.recognitionSettings.discreteConfidence ? Color.green.opacity(0.5) : Color.orange.opacity(0.4))
+                                            .fill(item.score >= rs.discreteConfidence ? Color.green.opacity(0.5) : Color.orange.opacity(0.4))
                                             .frame(width: geo.size.width * item.score)
                                     }
                                 }
@@ -141,7 +144,7 @@ struct RecognitionView: View {
                             }
                         }
                     }
-                    Text("Threshold: \(String(format: "%.0f%%", appState.recognitionSettings.discreteConfidence * 100)) / \(String(format: "%.0f%%", appState.recognitionSettings.locationConfidence * 100))")
+                    Text("Threshold: \(String(format: "%.0f%%", rs.discreteConfidence * 100)) / \(String(format: "%.0f%%", rs.locationConfidence * 100))")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -159,19 +162,19 @@ struct RecognitionView: View {
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            layerRow("1 Finger", $appState.recognitionSettings.layer1Key)
-            layerRow("2 Fingers", $appState.recognitionSettings.layer2Key)
-            layerRow("3 Fingers", $appState.recognitionSettings.layer3Key)
-            layerRow("4 Fingers", $appState.recognitionSettings.layer4Key)
-            layerRow("5 Fingers", $appState.recognitionSettings.layer5Key)
+            layerRow("1 Finger", $rs.layer1Key)
+            layerRow("2 Fingers", $rs.layer2Key)
+            layerRow("3 Fingers", $rs.layer3Key)
+            layerRow("4 Fingers", $rs.layer4Key)
+            layerRow("5 Fingers", $rs.layer5Key)
 
-            let usesAnchor = (1...5).contains { appState.recognitionSettings.layerKey(for: $0) == .anchor }
+            let usesAnchor = (1...5).contains { rs.layerKey(for: $0) == .anchor }
             if usesAnchor {
                 Divider()
 
                 SettingsSlider(
                     label: "Anchor Delay",
-                    value: $appState.recognitionSettings.anchorActivationDelay,
+                    value: $rs.anchorActivationDelay,
                     range: 0.10...0.80,
                     step: 0.01,
                     help: "How long the held finger must stay down before Anchor activates.",
@@ -180,7 +183,7 @@ struct RecognitionView: View {
 
                 SettingsSlider(
                     label: "Anchor Movement Tolerance",
-                    value: $appState.recognitionSettings.anchorHoldTolerance,
+                    value: $rs.anchorHoldTolerance,
                     range: 0.02...0.20,
                     step: 0.005,
                     help: "How far the anchor finger may drift before the anchor cancels. Small natural wiggles stay within this; a deliberate slide cancels it and returns to normal usage.",
@@ -197,12 +200,12 @@ struct RecognitionView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
-                    TrackpadZoneMultiGrid(enabledZones: $appState.recognitionSettings.anchorAllowedZones)
+                    TrackpadZoneMultiGrid(enabledZones: $rs.anchorAllowedZones)
                         .frame(width: 180, height: 132)
                 }
             }
 
-            let allAlwaysOn = (1...5).allSatisfy { appState.recognitionSettings.layerKey(for: $0) == .alwaysOn }
+            let allAlwaysOn = (1...5).allSatisfy { rs.layerKey(for: $0) == .alwaysOn }
             if allAlwaysOn {
                 Text("All layers are Always On — gestures activate without any modifier key.")
                     .font(.caption2)
@@ -244,16 +247,16 @@ struct RecognitionView: View {
 
             SettingsSlider(
                 label: "Shape Confidence",
-                value: $appState.recognitionSettings.discreteConfidence,
+                value: $rs.discreteConfidence,
                 range: 0.5...0.95,
-                help: confidenceHelp(appState.recognitionSettings.discreteConfidence)
+                help: confidenceHelp(rs.discreteConfidence)
             )
 
             SettingsSlider(
                 label: "Minimum Length",
-                value: $appState.recognitionSettings.discreteMinLength,
+                value: $rs.discreteMinLength,
                 range: 0.1...1.0,
-                help: minLengthHelp(appState.recognitionSettings.discreteMinLength)
+                help: minLengthHelp(rs.discreteMinLength)
             )
         }
     }
@@ -267,31 +270,31 @@ struct RecognitionView: View {
 
             SettingsSlider(
                 label: "Shape Confidence",
-                value: $appState.recognitionSettings.locationConfidence,
+                value: $rs.locationConfidence,
                 range: 0.4...0.95,
-                help: confidenceHelp(appState.recognitionSettings.locationConfidence)
+                help: confidenceHelp(rs.locationConfidence)
             )
 
             SettingsSlider(
                 label: "Minimum Length",
-                value: $appState.recognitionSettings.locationMinLength,
+                value: $rs.locationMinLength,
                 range: 0.1...1.0,
-                help: minLengthHelp(appState.recognitionSettings.locationMinLength)
+                help: minLengthHelp(rs.locationMinLength)
             )
 
             SettingsSlider(
                 label: "Position Tolerance",
-                value: $appState.recognitionSettings.locationRadius,
+                value: $rs.locationRadius,
                 range: 0.05...0.5,
-                help: locationRadiusHelp(appState.recognitionSettings.locationRadius)
+                help: locationRadiusHelp(rs.locationRadius)
             )
 
             SettingsSlider(
                 label: "Multi-Tap Window",
-                value: $appState.recognitionSettings.zoneTapWindow,
+                value: $rs.zoneTapWindow,
                 range: 0.15...1.0,
                 step: 0.05,
-                help: zoneTapWindowHelp(appState.recognitionSettings.zoneTapWindow)
+                help: zoneTapWindowHelp(rs.zoneTapWindow)
             )
         }
     }
@@ -305,10 +308,10 @@ struct RecognitionView: View {
 
             SettingsSlider(
                 label: "Lift Rewind",
-                value: $appState.recognitionSettings.continuousLiftRewind,
+                value: $rs.continuousLiftRewind,
                 range: 0.0...0.40,
                 step: 0.02,
-                help: liftRewindHelp(appState.recognitionSettings.continuousLiftRewind)
+                help: liftRewindHelp(rs.continuousLiftRewind)
             )
 
             Text("Per-gesture sensitivity is configured in each gesture's settings.")

@@ -1,10 +1,10 @@
 import Foundation
+import Combine
 
-@Observable
-final class GestureStore {
+final class GestureStore: ObservableObject {
     static let shared = GestureStore()
 
-    private(set) var gestures: [GestureDefinition] = []
+    @Published private(set) var gestures: [GestureDefinition] = []
     private let fileURL: URL
 
     private init() {

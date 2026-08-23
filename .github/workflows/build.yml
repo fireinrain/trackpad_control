@@ -33,16 +33,21 @@ jobs:
 
       - name: Build (Release)
         run: |
+          set -o pipefail
+          # ARCHS forces a universal binary so the artifact runs on both
+          # Apple Silicon and Intel Macs (the CI runner itself is arm64 only).
           xcodebuild -project trackpad_control.xcodeproj \
             -scheme trackpad_control \
             -configuration Release \
             -destination 'platform=macOS' \
             -derivedDataPath build-release \
             build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
-      - name: Verify minimum OS version
+      - name: Verify minimum OS version and architectures
         run: |
           APP=build-release/Build/Products/Release/trackpad_control.app
           BIN="$APP/Contents/MacOS/trackpad_control"
@@ -54,6 +59,11 @@ jobs:
             echo "::error::Expected deployment target 12.x, got $MINOS"
             exit 1
           fi
+          echo "--- architectures ---"
+          LIPO=$(lipo -archs "$BIN")
+          echo "$LIPO"
+          case "$LIPO" in *x86_64*) : ;; *) echo "::error::Missing x86_64 slice — app would not run on Intel Macs"; exit 1;; esac
+          case "$LIPO" in *arm64*) : ;; *) echo "::error::Missing arm64 slice"; exit 1;; esac
           echo "--- Info.plist LSMinimumSystemVersion ---"
           /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
 
@@ -61,6 +71,14 @@ jobs:
         run: |
           cd build-release/Build/Products/Release
           zip -r -q "$GITHUB_WORKSPACE/trackpad_control.zip" trackpad_control.app
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.sha }}
+          path: build.log
+          retention-days: 7
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

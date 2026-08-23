@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct AdvancedView: View {
-    @State private var appState = AppState.shared
+    @ObservedObject private var appState = AppState.shared
     @State private var launchAtLogin = UserDefaults.standard.bool(forKey: "adv_launchAtLogin")
     @State private var pauseWhileTyping = UserDefaults.standard.object(forKey: "adv_pauseWhileTyping") != nil ? UserDefaults.standard.bool(forKey: "adv_pauseWhileTyping") : true
     @State private var typingPauseWindow = UserDefaults.standard.object(forKey: "adv_typingPauseWindow") != nil ? UserDefaults.standard.double(forKey: "adv_typingPauseWindow") : 0.7

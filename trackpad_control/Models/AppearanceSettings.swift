@@ -1,31 +1,31 @@
 import Foundation
+import Combine
 
-@Observable
-final class AppearanceSettings {
+final class AppearanceSettings: ObservableObject {
     private static let d = UserDefaults.standard
 
-    var traceThickness: Double = 2.0 {
+    @Published var traceThickness: Double = 2.0 {
         didSet { Self.d.set(traceThickness, forKey: "as_traceThickness") }
     }
-    var traceOpacity: Double = 0.4 {
+    @Published var traceOpacity: Double = 0.4 {
         didSet { Self.d.set(traceOpacity, forKey: "as_traceOpacity") }
     }
-    var traceFadeDuration: Double = 0.3 {
+    @Published var traceFadeDuration: Double = 0.3 {
         didSet { Self.d.set(traceFadeDuration, forKey: "as_traceFadeDuration") }
     }
-    var acknowledgmentIntensity: Double = 0.3 {
+    @Published var acknowledgmentIntensity: Double = 0.3 {
         didSet { Self.d.set(acknowledgmentIntensity, forKey: "as_acknowledgmentIntensity") }
     }
-    var showLivePath: Bool = false {
+    @Published var showLivePath: Bool = false {
         didSet { Self.d.set(showLivePath, forKey: "as_showLivePath") }
     }
-    var showAcknowledgment: Bool = true {
+    @Published var showAcknowledgment: Bool = true {
         didSet { Self.d.set(showAcknowledgment, forKey: "as_showAcknowledgment") }
     }
-    var overlayBackgroundOpacity: Double = 0.55 {
+    @Published var overlayBackgroundOpacity: Double = 0.55 {
         didSet { Self.d.set(overlayBackgroundOpacity, forKey: "as_overlayBgOpacity") }
     }
-    var overlaySize: Double = 1.0 {
+    @Published var overlaySize: Double = 1.0 {
         didSet { Self.d.set(overlaySize, forKey: "as_overlaySize") }
     }
 

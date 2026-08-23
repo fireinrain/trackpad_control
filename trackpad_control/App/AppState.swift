@@ -57,7 +57,7 @@ final class AppState: ObservableObject {
 
 
 
-    @Published var gestures: [GestureDefinition] {
+    var gestures: [GestureDefinition] {
         get { gestureStore.gestures }
     }
 
@@ -106,9 +106,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case advanced = "Advanced"
 
-    @Published var id: String { rawValue }
+    var id: String { rawValue }
 
-    @Published var icon: String {
+    var icon: String {
         switch self {
         case .gestures: "rectangle.3.group"
         case .recognition: "brain.head.profile"

@@ -1,0 +1,98 @@
+name: Release
+
+# 推送 tag（如 v1.2）时触发：构建通用二进制并发布 GitHub Release。
+# 触发方式：
+#   git tag v1.2 && git push origin v1.2
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish (universal arm64 + x86_64)
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Build (Release, universal)
+        run: |
+          set -o pipefail
+          # Universal binary: runs on Apple Silicon AND Intel Macs,
+          # deployment target macOS 12.
+          xcodebuild -project trackpad_control.xcodeproj \
+            -scheme trackpad_control \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build-release \
+            build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Report compile errors as annotations
+        if: failure()
+        run: |
+          grep -E "(error|warning):" "$GITHUB_WORKSPACE/build.log" \
+            | grep -v "^$" | sort -u | head -50 \
+            | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+
+      - name: Verify minimum OS version and architectures
+        run: |
+          APP=build-release/Build/Products/Release/trackpad_control.app
+          BIN="$APP/Contents/MacOS/trackpad_control"
+          echo "--- binary build metadata ---"
+          vtool -show-build "$BIN"
+          MINOS=$(vtool -show-build "$BIN" | awk '/minos/ {print $NF}')
+          echo "binary minos = $MINOS"
+          if [[ "$MINOS" != 12.* ]]; then
+            echo "::error::Expected deployment target 12.x, got $MINOS"
+            exit 1
+          fi
+          echo "--- architectures ---"
+          LIPO=$(lipo -archs "$BIN")
+          echo "$LIPO"
+          case "$LIPO" in *x86_64*) : ;; *) echo "::error::Missing x86_64 slice — app would not run on Intel Macs"; exit 1;; esac
+          case "$LIPO" in *arm64*) : ;; *) echo "::error::Missing arm64 slice"; exit 1;; esac
+          echo "--- Info.plist LSMinimumSystemVersion ---"
+          /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$APP/Contents/Info.plist"
+
+      - name: Package app
+        run: |
+          cd build-release/Build/Products/Release
+          zip -r -q "$GITHUB_WORKSPACE/trackpad_control.zip" trackpad_control.app
+          shasum -a 256 "$GITHUB_WORKSPACE/trackpad_control.zip"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — replacing asset"
+            gh release upload "$TAG" "$GITHUB_WORKSPACE/trackpad_control.zip" --clobber
+          else
+            gh release create "$TAG" \
+              "$GITHUB_WORKSPACE/trackpad_control.zip" \
+              --title "Trackpad Control $TAG" \
+              --notes "macOS 12+ universal build (Apple Silicon & Intel).
+
+              **First launch:** right-click the app → Open → Open (app is unsigned).
+              Requires macOS 12 Monterey or newer."
+          fi

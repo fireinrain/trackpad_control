@@ -103,6 +103,10 @@ Phase 5  文档         README / docs 更新                              ✅ �
 workflow 已强制 `ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO` 并用 `lipo -archs` 校验双架构，
 缺失任一架构即失败；另增加 build.log 失败时自动上传，便于无 gh CLI 时排查。
 
+**发布流程（2026-08-23 新增）**：`.github/workflows/release.yml` 由 tag 推送触发
+（`git tag vX.Y.Z && git push origin vX.Y.Z`），构建通用二进制并自动创建 GitHub Release，
+附件 `trackpad_control.zip` 与 README 下载链接约定一致。
+
 ### 实施记录 v1（2026-08-23）
 
 **新增文件**

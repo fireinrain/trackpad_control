@@ -156,11 +156,37 @@ workflow 已强制 `ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO` 并用 `lipo -arch
 
 ## 九、验收清单（Phase 4 用）
 
-- [ ] macOS 12.7：状态栏图标出现、点击弹出面板、手势录制实时路径渲染正常
-- [ ] macOS 12.7：识别触发（键盘快捷键 / 启动 App / 窗口管理 / 连续操作）
-- [ ] 设置窗口在 12 上侧栏布局正常、无崩溃；空手势列表显示占位视图
-- [ ] 导入/导出 starter-gestures.json 往返一致
-- [ ] 开机启动开关行为正确
-- [ ] 覆盖层诊断自测（`TC_OVERLAY_SELF_TEST=1`）在 12 与 26 均通过
-- [ ] macOS 13/14/15：MenuBarExtra 行为与重构前一致
-- [ ] macOS 26：无视觉/功能回归
+> 状态标记：✅ 通过 · ⬜ 待测 · ➖ 无设备暂缓
+> 最后更新：2026-08-23
+
+### A. 构建 / 打包（CI）
+
+- ✅ Xcode 26 Release 构建通过（run 32645218096 及后续 tag 构建）
+- ✅ 部署目标校验：二进制 `minos = 12.0`，`LSMinimumSystemVersion = 12.0`
+- ✅ 双架构校验：`lipo -archs` 含 x86_64 + arm64（单一通用二进制，非两份产物）
+- ✅ 本机实测：Intel Mac (macOS 12.7) 安装 `/Applications` 并启动运行正常
+
+### B. macOS 12.7 真机功能回归（本机执行）
+
+- ✅ 状态栏图标出现、菜单弹出（随安装启动确认）；Tracking 开关切换时图标的动态变化待复测
+- ⬜ 录制链路：新建输入 → 录制手势，实时路径渲染流畅（验证 @Published 迁移后
+  `recordingUpdateCounter` 驱动的刷新）、完成后可保存
+- ⬜ 四类动作实际触发：键盘快捷键 / 启动 App / 窗口管理 / 连续操作
+- ⬜ 覆盖层轨迹绘制正常；诊断自测通过：
+  `TC_OVERLAY_SELF_TEST=1 open -a trackpad_control`
+- ⬜ 设置窗口：四个标签页切换正常、空列表占位视图观感可接受
+  （`UnavailableStateView` 的 12/13 替身布局）
+- ⬜ 导入/导出 JSON 往返一致（含 51 个预录手势的 starter-gestures.json）
+- ⬜ 开机启动开关保存并生效
+- ⬜ 内存观察：挂机 ≥30 分钟无异常增长（参考 docs/macos-low-memory-playbook.md）
+
+### C. 其他系统版本矩阵
+
+- ⬜ macOS 13/14/15：MenuBarExtra 路径行为与重构前一致；重点验证菜单栏图标随
+  Tracking 切换（ModernApp 属性包装器改动点）——➖ 如无对应设备可暂缓
+- ⬜ macOS 26：无视觉/功能回归 —— ➖ 需要 Tahoe 设备时再测
+
+### D. 收尾
+
+- ✅ release.yml 全流程演练（tag 触发 → 构建校验 → 发布附件 trackpad_control.zip）
+- ⬜ 清理预存 Swift 6 模式警告（WindowManager.Direction 隔离警告等，不阻塞）

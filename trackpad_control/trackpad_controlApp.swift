@@ -1,7 +1,22 @@
 import SwiftUI
 
+// TC_COMPAT(<13): MenuBarExtra requires macOS 13, so the entry point forks.
+// ModernApp keeps the original MenuBarExtra scene on 13+; LegacyApp installs
+// a native NSStatusItem via LegacyMenuBarController on macOS 12.
 @main
-struct trackpad_controlApp: App {
+enum AppEntry {
+    static func main() {
+        if #available(macOS 13.0, *) {
+            ModernApp.main()
+        } else {
+            LegacyApp.main()
+        }
+    }
+}
+
+// TC_COMPAT(<13): availability gate only — scene identical to the original app.
+@available(macOS 13.0, *)
+struct ModernApp: App {
     @State private var appState = AppState.shared
 
     var body: some Scene {
@@ -12,6 +27,34 @@ struct trackpad_controlApp: App {
     }
 
     init() {
+        AppStartup.perform()
+    }
+}
+
+/// TC_COMPAT(<13): macOS 12 fallback app. `MenuBarExtra` is unavailable below
+/// macOS 13, so `LegacyAppDelegate` installs the NSStatusItem at launch; the
+/// Settings scene is an inert anchor satisfying the App protocol.
+struct LegacyApp: App {
+    @NSApplicationDelegateAdaptor(LegacyAppDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        Settings { EmptyView() }
+    }
+
+    init() {
+        AppStartup.perform()
+    }
+}
+
+// TC_COMPAT(<13): installs the macOS 12 status item once AppKit finishes launching.
+final class LegacyAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        LegacyMenuBarController.shared.install()
+    }
+}
+
+enum AppStartup {
+    static func perform() {
         StartupMaintenance.run()
         mtdLog("[STARTUP] marker=\(GestureOverlayWindow.diagnosticBuildMarker)")
         WindowManager.startTrackingSpaceChanges()

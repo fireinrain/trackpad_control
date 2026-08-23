@@ -32,7 +32,8 @@ struct TriggerEditorView: View {
                     Text(type.rawValue).tag(type)
                 }
             }
-            .onChange(of: triggerType) { _, newValue in
+            // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+            .tcOnChange(of: triggerType) { newValue in
                 switch newValue {
                 case .keyboardShortcut:
                     triggerAction = .keyboardShortcut(KeyboardShortcutTrigger(key: ""))

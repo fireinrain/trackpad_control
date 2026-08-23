@@ -418,7 +418,7 @@ enum WindowManager {
     mtdLog("H-TILE: target app=\(app.localizedName ?? "?") pid=\(pid) side=\(side) layout=\(layout) frame=\(target)")
         setWindowFrame(axWindow, target: target, screenHeight: screenH)
         AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
-        app.activate()
+        app.activate(options: .activateIgnoringOtherApps) // TC_COMPAT(<14): plain activate() needs macOS 14
 
         horizontalCycleSideByPID[pid] = side
         horizontalCycleIndexByPID[pid] = nextIndex
@@ -470,7 +470,7 @@ enum WindowManager {
                   !lastApp.isTerminated {
             // Frontmost is missing or is our own app — fall back to the sticky target.
             targetApp = lastApp
-            targetApp.activate()
+            targetApp.activate(options: .activateIgnoringOtherApps) // TC_COMPAT(<14): plain activate() needs macOS 14
             mtdLog("execute: target=sticky app=\(lastApp.localizedName ?? "?") pid=\(lastApp.processIdentifier) frontmost=\(frontmost?.localizedName ?? "nil")")
         } else if let front = frontmost {
             targetApp = front
@@ -536,7 +536,7 @@ enum WindowManager {
 
         // Raise the window so it stays focused even if the cursor is over a different window
         AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
-        targetApp.activate()
+        targetApp.activate(options: .activateIgnoringOtherApps) // TC_COMPAT(<14): plain activate() needs macOS 14
 
         // Remember target for sticky re-use
         stickyPID = targetApp.processIdentifier
@@ -546,7 +546,7 @@ enum WindowManager {
         let pid = targetApp.processIdentifier
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             if let app = NSRunningApplication(processIdentifier: pid) {
-                app.activate()
+                app.activate(options: .activateIgnoringOtherApps) // TC_COMPAT(<14): plain activate() needs macOS 14
             }
         }
     }

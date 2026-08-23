@@ -154,7 +154,7 @@ struct RecognitionView: View {
 
     private var activationSection: some View {
         SettingsSection(title: "ACTIVATION LAYERS") {
-            Label("Set a modifier key per finger count — Always On captures without a key", systemImage: "hand.raised.fingers.spread")
+            Label("Set a modifier key per finger count — Always On captures without a key", systemImage: "hand.raised.fill") // TC_COMPAT(macOS 12): renamed SF Symbol
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)

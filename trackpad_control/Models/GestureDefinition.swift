@@ -14,7 +14,7 @@ enum InputType: String, Codable, CaseIterable, Sendable {
         case .discrete: "hand.draw"
         case .continuous: "slider.horizontal.3"
         case .pinch: "arrow.up.left.and.arrow.down.right"
-        case .dial: "dial.low"
+        case .dial: "dial.min" // TC_COMPAT(macOS 12): "dial.low" absent from Monterey symbol set
         case .zoneTap: "tablecells"
         }
     }

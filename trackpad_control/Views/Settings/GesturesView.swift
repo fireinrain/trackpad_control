@@ -111,7 +111,7 @@ struct GesturesView: View {
                     Button("\(count)F") { fingerFilter = count }
                 }
             } label: {
-                Image(systemName: "hand.raised.fingers.spread")
+                Image(systemName: "hand.raised.fill") // TC_COMPAT(macOS 12): renamed SF Symbol
                     .font(.callout)
             }
             .menuStyle(.borderlessButton)
@@ -139,7 +139,9 @@ struct GesturesView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        ContentUnavailableView {
+        // TC_COMPAT(<14): ContentUnavailableView requires macOS 14; shim
+        // renders the native view on 14+ and a similar fallback below.
+        UnavailableStateView {
             Label("No Inputs", systemImage: "hand.draw")
         } description: {
             if searchText.isEmpty && filterMode == .all && fingerFilter == nil && typeFilter == nil {

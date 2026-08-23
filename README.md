@@ -29,7 +29,7 @@ so export your existing gestures first if you want to keep them.
 
 ## Build & install
 
-Requires macOS 26 and Xcode 26+.
+Building requires Xcode 26 or newer. The built app supports **macOS 12 (Monterey) through macOS 26**.
 
 ```bash
 git clone https://github.com/Smoep/trackpad_control.git

@@ -27,14 +27,16 @@ struct AdvancedView: View {
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .toggleStyle(.switch)
                 .help("Automatically start Trackpad Control when you log in.")
-                .onChange(of: launchAtLogin) { _, val in
+                // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+                .tcOnChange(of: launchAtLogin) { val in
                     UserDefaults.standard.set(val, forKey: "adv_launchAtLogin")
                 }
 
             Toggle("Pause while typing", isOn: $pauseWhileTyping)
                 .toggleStyle(.switch)
                 .help("Temporarily ignore gestures while typing to prevent accidental triggers.")
-                .onChange(of: pauseWhileTyping) { _, val in
+                // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+                .tcOnChange(of: pauseWhileTyping) { val in
                     UserDefaults.standard.set(val, forKey: "adv_pauseWhileTyping")
                 }
 
@@ -48,14 +50,16 @@ struct AdvancedView: View {
             )
             .disabled(!pauseWhileTyping)
             .opacity(pauseWhileTyping ? 1 : 0.45)
-            .onChange(of: typingPauseWindow) { _, val in
+            // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+            .tcOnChange(of: typingPauseWindow) { val in
                 UserDefaults.standard.set(val, forKey: "adv_typingPauseWindow")
             }
 
             Toggle("Enable diagnostics log", isOn: $diagnosticsEnabled)
                 .toggleStyle(.switch)
                 .help("Log gesture captures, match scores, and trigger executions for debugging.")
-                .onChange(of: diagnosticsEnabled) { _, val in
+                // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+                .tcOnChange(of: diagnosticsEnabled) { val in
                     UserDefaults.standard.set(val, forKey: "adv_diagnostics")
                 }
 

@@ -247,7 +247,7 @@ struct GestureEditorSheet: View {
                     .foregroundStyle(.secondary)
                 Text("·")
                     .foregroundStyle(.tertiary)
-                Label(gesture.tapCount == 1 ? "Single tap" : gesture.tapCount == 2 ? "Double tap" : "Triple tap", systemImage: "touch.radiowaves.left")
+                Label(gesture.tapCount == 1 ? "Single tap" : gesture.tapCount == 2 ? "Double tap" : "Triple tap", systemImage: "radiowaves.left") // TC_COMPAT(macOS 12): renamed SF Symbol
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("·")
@@ -282,7 +282,7 @@ struct GestureEditorSheet: View {
         case .pinch:
             "arrow.up.left.and.arrow.down.right"
         case .dial:
-            "dial.low"
+            "dial.min" // TC_COMPAT(macOS 12): renamed SF Symbol
         default:
             "questionmark"
         }
@@ -676,7 +676,7 @@ struct GestureEditorSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Label(gesture.inputType.rawValue, systemImage: gesture.inputType.icon)
                 if gesture.inputType.isContinuousFamily {
-                    Label("\(gesture.fingerCount)F \(continuousFamilySummary)", systemImage: "hand.raised.fingers.spread")
+                    Label("\(gesture.fingerCount)F \(continuousFamilySummary)", systemImage: "hand.raised.fill") // TC_COMPAT(macOS 12): renamed SF Symbol
                     Label(gesture.continuousControl.rawValue, systemImage: gesture.continuousControl.icon)
                 } else if gesture.inputType == .zoneTap {
                     Label("\(gesture.fingerCount)F \(gesture.tapCount == 1 ? "single" : gesture.tapCount == 2 ? "double" : "triple") tap", systemImage: "hand.tap")

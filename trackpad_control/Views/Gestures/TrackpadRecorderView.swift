@@ -21,7 +21,8 @@ struct TrackpadRecorderView: View {
             recordingControls
         }
         // Observe live paths from TCM via AppState
-        .onChange(of: appState.recordingUpdateCounter) {
+        // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+        .tcOnChange(of: appState.recordingUpdateCounter) { _ in
             guard isArmed && countdown == 0 && !gestureReady else { return }
             let paths = appState.recordingLivePaths
             if isMeaningfulRecording(paths) {
@@ -33,7 +34,8 @@ struct TrackpadRecorderView: View {
             }
         }
         // Observe completed gesture from TCM via AppState
-        .onChange(of: appState.recordingCompletionCounter) {
+        // TC_COMPAT(<14): two-parameter onChange closure needs macOS 14
+        .tcOnChange(of: appState.recordingCompletionCounter) { _ in
             guard let paths = appState.recordedPaths else { return }
             guard isMeaningfulRecording(paths) else {
                 appState.recordedPaths = nil
@@ -63,7 +65,7 @@ struct TrackpadRecorderView: View {
             HStack {
                 Label(
                     "\(totalPoints) points · \(currentFingerCount) finger\(currentFingerCount == 1 ? "" : "s") · \(fingerPaths.count) path\(fingerPaths.count == 1 ? "" : "s")",
-                    systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                    systemImage: "point.topleft.down.curvedto.point.bottomright.up" // TC_COMPAT(macOS 12): renamed SF Symbol
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
